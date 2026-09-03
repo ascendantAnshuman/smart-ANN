@@ -398,3 +398,72 @@ the whole pipeline unrunnable: recording what we know beats recording nothing.
 
 Tests reproduce the exact lost-update sequence, the corrupt-file recovery, and
 the absence of a leftover temp file.
+
+---
+
+## ADR-0017 — hnswlib comes from `chroma-hnswlib` on Python 3.12, not a compiler
+
+**Date:** 2026-09-03 · **Phase:** 2 (gate) · **Status:** accepted ·
+**Supersedes the toolchain half of ADR-0006**
+
+Phase 2's gate is `import hnswlib`. Resolving it without elevation required
+knowing which of several assumptions were actually true, so all of them were
+measured:
+
+- **Upstream `hnswlib` publishes no binary wheels at all.** Not for cp311,
+  cp312 or cp313, on any platform: `pip download hnswlib --only-binary=:all:`
+  reports "from versions: none" for every one. It is source-only, so it cannot
+  be installed anywhere without a C++ toolchain. This kills the "just pick a
+  different Python version" idea outright.
+- **MSVC cannot be installed from this session.** `winget install
+  Microsoft.VisualStudio.2022.BuildTools` downloads and hash-verifies, then
+  fails with **exit code 1602 (user cancelled)** because the session is not
+  elevated and the UAC prompt cannot be answered.
+- **WSL2 cannot install a toolchain unattended either.** `sudo -n true` fails:
+  no passwordless sudo, so `apt install build-essential` needs a human.
+- **`chroma-hnswlib` ships a cp312 Windows wheel.** Version 0.7.5 does; 0.7.6
+  is source-only on Windows. There is no cp313 wheel for any version.
+
+**Decision.** Depend on `chroma-hnswlib==0.7.5` and target **Python 3.12**.
+Chroma's redistribution imports as `hnswlib` and is the same library. The
+standalone CPython 3.12.14 was installed by `uv python install 3.12`, which
+needs no elevation.
+
+**Why this is not a compromise on the science.** `tests/test_hnswlib_contract.py`
+pins every behaviour Phase 2 depends on, verified on the actual binary:
+
+- the full API surface (`init_index`, `add_items`, `save_index`, `load_index`,
+  `set_ef`, `knn_query`, `get_items`, `get_ids_list`, ...) and all three spaces
+- **per-query `set_ef` trades recall for work monotonically**: recall@10 runs
+  0.527 / 0.655 / 0.811 / 0.935 / 0.988 / 0.998 across ef 8 -> 256. This is the
+  premise the entire adaptive layer rests on, now measured rather than assumed.
+- `save_index`/`load_index` round-trips to bit-identical labels and distances,
+  which is what per-cluster graph load/unload requires
+- `knn_query` returns float32 **distances**, needed for score-equality recall
+- custom int64 labels survive serialisation, so per-cluster graphs can store
+  global vector ids directly instead of needing a second mapping layer
+
+**One semantic trap, now pinned by a test.** hnswlib's `ip` space returns
+**`1 - inner_product`**, and its `l2` space returns **squared** distance. Our
+ground truth stores raw similarities for `ip` datasets. Comparing the two
+directly inverts the ranking, and nothing in the types would reveal it. Both
+conventions are asserted in the contract tests, and the Phase 1 ground-truth
+addendum stores distances in the library's own units.
+
+**Consequences.**
+- `requires-python` becomes `>=3.11,<3.13`; the 3.13 environment is abandoned.
+- The paper should cite hnswlib and note the binary distribution used.
+- Re-embedding was not needed: the SQLite embedding cache is raw float32 keyed
+  by SHA-256, and gte-small embeddings re-produced under 3.12 match those
+  written under 3.13 to cosine >= 0.999. Cross-version reproducibility, free.
+- If MSVC is installed later, switching to upstream `hnswlib` is a one-line
+  dependency change and the contract tests guard the swap.
+
+**Alternatives.** `usearch` ships a cp313 wheel and is a capable HNSW
+implementation with memory-mapped views that would suit per-cluster loading --
+rejected because Section 4 mandates hnswlib and a different graph
+implementation would make the MobileRAG comparison inexact. `faiss-cpu` ships
+wheels -- rejected by Section 4 for the primary index. WSL2 -- available as
+rung 4 but it needs a password *and* costs every telemetry signal (no thermal
+zones, no RAPL, no cpufreq), so it is strictly worse when a no-elevation path
+exists on Windows.

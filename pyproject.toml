@@ -7,7 +7,7 @@ name = "smartann"
 version = "0.1.0"
 description = "SMART-ANN: runtime resource-aware adaptive control for on-device RAG retrieval"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "Ashutosh Gupta", email = "ashutoshgupta5400@gmail.com" }]
 
@@ -30,6 +30,19 @@ dependencies = [
     "requests>=2.31",
     "pysbd>=0.3.4",
     "sentence-transformers>=3.0",
+    # Phase 2: the ANN index.
+    #
+    # This is hnswlib, distributed under a different name. Upstream `hnswlib`
+    # publishes NO binary wheels for any Python version (sdist only), so it
+    # cannot be installed without a C++ toolchain -- and MSVC installation on
+    # this machine requires elevation that is not available. `chroma-hnswlib`
+    # is Chroma's redistribution of the same library: it imports as `hnswlib`
+    # and its full API surface is verified in tests/test_hnswlib_contract.py.
+    #
+    # Pinned to 0.7.5 because it is the newest release with a cp312 Windows
+    # wheel; 0.7.6 is source-only there. This is also why the project targets
+    # Python 3.12 rather than 3.13. See docs/decisions.md ADR-0017.
+    "chroma-hnswlib==0.7.5",
 ]
 
 [project.optional-dependencies]
@@ -56,7 +69,7 @@ packages = ["smartann"]
 # ----------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py311"  # keep our own syntax portable to the floor
 extend-exclude = ["data", "results"]
 
 [tool.ruff.lint]
@@ -77,10 +90,10 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 # ----------------------------------------------------------------------------
 # mypy: strict on smartann/, lenient on scripts/ and tests/ (Section 4)
 [tool.mypy]
-# 3.13 rather than the 3.11 floor in requires-python: numpy's bundled stubs use
+# 3.12 rather than the 3.11 floor in requires-python: numpy's bundled stubs use
 # PEP 695 `type` statements, which mypy rejects when told to target 3.11. Ruff's
 # target-version stays py311 so our own syntax remains portable to the floor.
-python_version = "3.13"
+python_version = "3.12"
 files = ["smartann", "scripts", "tests"]
 warn_unused_configs = true
 show_error_codes = true
