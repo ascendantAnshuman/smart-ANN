@@ -1,0 +1,26 @@
+# Recorded on first successful download, then verified on every run.
+# Do not edit by hand: a mismatch means the source changed or the file is
+# corrupt, and that is information worth keeping.
+nytimes:
+  hdf5:
+    n_bytes: 315208288
+    recorded_at: '2026-09-03T10:34:38Z'
+    resolved_url: https://ann-benchmarks.com/nytimes-256-angular.hdf5
+    sha256: 6ad5d2cde6d6a6f21528d541901304ebfd40885d6ce6afae37bccbe278254a93
+sift1m:
+  hdf5:
+    n_bytes: 525128288
+    recorded_at: '2026-09-03T10:27:29Z'
+    resolved_url: https://ann-benchmarks.com/sift-128-euclidean.hdf5
+    sha256: dd6f0a6ed6b7ebb8934680f861a33ed01ff33991eaee4fd60914d854a0ca5984
+squad:
+  dev:
+    n_bytes: 4854279
+    recorded_at: '2026-09-03T10:18:17Z'
+    resolved_url: https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json
+    sha256: 95aa6a52d5d6a735563366753ca50492a658031da74f301ac5238b03966972c9
+  train:
+    n_bytes: 30288272
+    recorded_at: '2026-09-03T10:18:16Z'
+    resolved_url: https://rajpurkar.github.io/SQuAD-explorer/dataset/train-v1.1.json
+    sha256: 3527663986b8295af4f7fcdff1ba1ff3f72d07d61a20f487cb238a6ef92fd955

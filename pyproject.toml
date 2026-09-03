@@ -25,6 +25,11 @@ dependencies = [
     "tqdm>=4.66",
     "matplotlib>=3.8",
     "scikit-learn>=1.4",
+    # Phase 1: datasets, embeddings, ground truth
+    "h5py>=3.10",
+    "requests>=2.31",
+    "pysbd>=0.3.4",
+    "sentence-transformers>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +43,8 @@ dev = [
     "pandas-stubs",
     "types-PyYAML",
     "types-psutil",
+    "types-tqdm",
+    "types-requests",
 ]
 
 [project.scripts]
@@ -70,7 +77,10 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 # ----------------------------------------------------------------------------
 # mypy: strict on smartann/, lenient on scripts/ and tests/ (Section 4)
 [tool.mypy]
-python_version = "3.11"
+# 3.13 rather than the 3.11 floor in requires-python: numpy's bundled stubs use
+# PEP 695 `type` statements, which mypy rejects when told to target 3.11. Ruff's
+# target-version stays py311 so our own syntax remains portable to the floor.
+python_version = "3.13"
 files = ["smartann", "scripts", "tests"]
 warn_unused_configs = true
 show_error_codes = true
@@ -86,7 +96,16 @@ module = ["scripts.*", "tests.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["yaml", "psutil", "matplotlib.*", "sklearn.*", "scipy.*"]
+module = [
+    "yaml",
+    "psutil",
+    "matplotlib.*",
+    "sklearn.*",
+    "scipy.*",
+    "h5py",
+    "pysbd",
+    "sentence_transformers.*",
+]
 ignore_missing_imports = true
 
 # ----------------------------------------------------------------------------

@@ -32,3 +32,6 @@ repos:
           - typer>=0.12
           - types-PyYAML
           - types-psutil
+          - types-requests
+          - types-tqdm
+          - numpy
