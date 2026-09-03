@@ -1,0 +1,7 @@
+# Example only -- the real Phase 2 index schema does not exist yet.
+# Present so `smartann config hash` is exercisable at Phase 0.
+nprobe: 4
+ef_centroid: 64
+ef_list: 64
+k: 5
+rerank_candidates: 20

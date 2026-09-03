@@ -1,0 +1,26 @@
+# data + results are never committed (Section 10)
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# editors / os
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
