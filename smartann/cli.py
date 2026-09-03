@@ -121,7 +121,7 @@ def data_status() -> None:
     table = Table(box=box.SIMPLE, pad_edge=False)
     table.add_column("dataset")
     table.add_column("kind")
-    for col in ("dl", "ver", "proc", "gt"):
+    for col in ("dl", "ver", "proc", "gt", "gtd"):
         table.add_column(col, justify="center")
     table.add_column("n_base", justify="right")
     table.add_column("n_queries", justify="right")
@@ -142,6 +142,7 @@ def data_status() -> None:
             tick(s.verified),
             tick(s.processed),
             tick(s.ground_truthed),
+            tick(s.gt_dists),
             f"{s.n_base:,}" if s.n_base is not None else "-",
             f"{s.n_queries:,}" if s.n_queries is not None else "-",
             str(s.dim),
@@ -168,6 +169,13 @@ def data_status() -> None:
         )
     if not missing and not unrecorded:
         console.print("[green]  every artifact on disk has a manifest entry[/green]")
+
+    # Exit status, not prose. A check a human reads is not a check.
+    incomplete = [s for s in rows if not s.complete]
+    if incomplete or missing or unrecorded:
+        for s in incomplete:
+            console.print(f"[red]  {s.name} is incomplete:[/red] missing {', '.join(s.missing())}")
+        raise typer.Exit(code=1)
 
 
 @data_app.command("prepare")
@@ -305,6 +313,7 @@ def _write_gt_dists(
     from smartann.data.download import sha256_file
     from smartann.data.groundtruth import DIST_CONVENTION, check_row_monotonic, gather_distances
     from smartann.data.manifest import DataManifest
+    from smartann.data.readers import duplicate_report
 
     space = spec.search_space
     dists = gather_distances(base, queries, neighbors, space)
@@ -340,10 +349,33 @@ def _write_gt_dists(
             "method": "exact, gathered against the stored neighbour ids",
             "monotonic_worst_violation": report.worst_violation,
             "monotonic_violating_rows": report.n_violating_rows,
+            # float64 on this side only. Retrieved distances come back from
+            # hnswlib as float32 by necessity, so the asymmetry is deliberate:
+            # it keeps the recall band's atol covering one noise floor, not two.
+            "dtype": str(dists.dtype),
+            "retrieved_side_dtype": "float32 (hnswlib)",
         },
     )
+
+    dup = duplicate_report(np.asarray(base))
+    typer.echo(
+        f"  duplicate base vectors: {dup.n_repeat_rows:,}/{dup.n_rows:,} "
+        f"({dup.repeat_fraction * 100:.3f}%) are byte-identical repeats, "
+        f"{dup.n_groups:,} groups, largest {dup.largest_group:,}"
+    )
+    base_path = out_dir / "base.npy"
+    if manifest.get(base_path) is not None:
+        manifest.annotate(
+            base_path,
+            {
+                "duplicate_rows": dup.n_repeat_rows,
+                "duplicate_groups": dup.n_groups,
+                "largest_duplicate_group": dup.largest_group,
+                "distinct_rows": dup.n_distinct,
+            },
+        )
     manifest.write()
-    typer.echo(f"wrote {path}  shape={dists.shape}  units={DIST_CONVENTION[space]}")
+    typer.echo(f"wrote {path}  shape={dists.shape}  units={DIST_CONVENTION[space]} {dists.dtype}")
 
 
 @data_app.command("gt-dists")

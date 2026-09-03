@@ -104,9 +104,15 @@ def test_no_args_shows_help() -> None:
 # data subcommands (implemented in Phase 1)
 # ---------------------------------------------------------------------------
 def test_data_status_runs_on_an_empty_root() -> None:
-    """Status must work before anything is downloaded, not crash."""
+    """Status must render before anything is downloaded, not crash.
+
+    It exits 1 because nothing is prepared -- completeness is an exit code now,
+    not a table to read past (ADR-0020). The point of this test is that the
+    table still renders and no exception escapes.
+    """
     result = runner.invoke(app, ["data", "status"])
-    assert result.exit_code == 0, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.output
+    assert result.exit_code == 1, result.output
     for name in ("sift1m", "nytimes", "squad"):
         assert name in result.output
 

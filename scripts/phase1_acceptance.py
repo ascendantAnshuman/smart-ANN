@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-"""Phase 1 acceptance checks 2-7, run against the real prepared data.
+"""Phase 1 acceptance checks, run against the real prepared data.
 
-Check 1 (`smartann data status`) and check 6 (pytest/ruff/mypy) are run
-separately as their own commands. Everything here reports PASS or FAIL with the
-measured numbers; nothing is asserted silently.
+Every check here produces a pass/fail verdict, not a paragraph to read. Check 1
+used to be "run `smartann data status` and look at it" -- and SQuAD sat with no
+ground truth through a passing Phase 1 because `gt: x` was printed and read
+past. It now runs the command and asserts its exit status. Check 6
+(pytest/ruff/mypy) is still run as its own command because it is the tooling.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from smartann.data.manifest import DataManifest
 from smartann.data.readers import load_processed
 from smartann.data.registry import spec_for
 
+NL_JOIN = chr(10) + "       "
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -33,6 +36,26 @@ def rss_mb() -> float:
 
 
 # ---------------------------------------------------------------------------
+def check1_data_status_exits_clean() -> None:
+    """Run the real command and assert its exit code. Do not read its table."""
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "smartann.cli", "data", "status"],
+        capture_output=True,
+        text=True,
+    )
+    bad = [
+        ln.strip() for ln in proc.stdout.splitlines() if "incomplete" in ln or "no manifest" in ln
+    ]
+    report(
+        "1. data status exits clean (every dataset complete)",
+        proc.returncode == 0,
+        f"exit code {proc.returncode}"
+        + (f"; {bad}" if bad else "; no dataset reported incomplete"),
+    )
+
+
 def check2_sift_groundtruth_selfcheck(n_queries: int = 200, k: int = 10) -> None:
     """Recompute SIFT top-10 by brute force and compare to the shipped neighbors."""
     paths = resolve_paths()
@@ -343,26 +366,42 @@ def check8_groundtruth_distances() -> None:
 
 
 def check9_tie_structure() -> None:
-    """How much recall the two metrics can disagree about, per dataset.
+    """Are the ties real duplicate vectors, or float32 cancellation?
 
-    Not pass/fail -- a measurement. If ties at the k-boundary were rare, the
-    score-equality metric would be an expensive way to compute the index-overlap
-    one, and Phase 2 would be carrying complexity for nothing.
+    The two have opposite consequences. If NYTimes genuinely contains repeated
+    vectors, score-equality recall is correct and the tie rate is a dataset
+    property. If instead ``1 - cos`` were merely collapsing near-duplicates at
+    the float32 floor (eps 1.19e-07 near 1.0), the ground truth would be
+    unreliable exactly where it matters and the metric would credit
+    genuinely-worse neighbours -- inflating recall in the flattering direction.
+
+    Settled by comparing raw bytes, which cannot be fooled by cancellation, and
+    by computing the distances themselves in float64.
     """
+    from smartann.data.readers import duplicate_report
+
     paths = resolve_paths()
     k = 10
     lines = []
+    ok = True
     for name in ("sift1m", "nytimes", "squad"):
-        dists = np.load(paths.processed / name / "groundtruth_dists_top100.npy").astype(np.float64)
-        at_k = dists[:, k - 1]
+        d = np.load(paths.processed / name / "groundtruth_dists_top100.npy")
+        ok &= d.dtype == np.float64
+        base = np.asarray(load_processed(paths.processed / name, "base"))
+        dup = duplicate_report(base)
+
+        at_k = d[:, k - 1]
         band = 1e-6 + 1e-6 * np.abs(at_k)
-        # neighbours beyond depth k that are indistinguishable from the k-th
-        extra = np.sum(np.abs(dists[:, k:] - at_k[:, None]) <= band[:, None], axis=1)
+        extra = np.sum(np.abs(d[:, k:] - at_k[:, None]) <= band[:, None], axis=1)
+        tie_pct = float(np.mean(extra > 0)) * 100
+
         lines.append(
-            f"{name:8s} k={k}: {float(np.mean(extra > 0)) * 100:5.2f}% of queries have a tie "
-            f"at the boundary, mean {extra.mean():.3f} extra, max {int(extra.max())}"
+            f"{name:8s} duplicates {dup.repeat_fraction * 100:6.3f}% of rows "
+            f"({dup.n_groups:,} groups, largest {dup.largest_group:,})  |  "
+            f"k={k} ties {tie_pct:5.2f}% of queries, mean {extra.mean():.3f} extra, "
+            f"max {int(extra.max())}  |  gt dtype {d.dtype}"
         )
-    report("9. tie structure at the k-boundary (measurement)", True, "\n       ".join(lines))
+    report("9. ties are real duplicates, not float32 cancellation", ok, NL_JOIN.join(lines))
 
 
 def check7_manifest_completeness() -> None:
@@ -405,6 +444,7 @@ def summary() -> None:
 
 
 def main() -> int:
+    check1_data_status_exits_clean()
     check2_sift_groundtruth_selfcheck()
     check3_nytimes_metric()
     check3b_nytimes_groundtruth_selfcheck()

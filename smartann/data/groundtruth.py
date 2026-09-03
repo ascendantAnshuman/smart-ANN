@@ -198,7 +198,7 @@ def gather_distances(
     queries: np.ndarray,
     neighbors: np.ndarray,
     space: Space,
-    query_block: int = 1024,
+    query_block: int = 256,  # float64 intermediates are 8x the float32 ones
 ) -> np.ndarray:
     """Distance from each query to each of *its own* stored neighbours.
 
@@ -210,7 +210,15 @@ def gather_distances(
     ``out[q, j] == dist(queries[q], base[neighbors[q, j]])`` by construction,
     and costs ``n_queries * depth`` comparisons rather than ``n_queries * n_base``.
 
-    Returns float32 in :data:`DIST_CONVENTION` units -- smaller is better.
+    Computed and returned in **float64**, deliberately. ``1 - ip`` suffers
+    catastrophic cancellation as the inner product approaches 1: float32 eps
+    near 1.0 is 1.19e-07, so every pair closer than that collapses onto the same
+    stored value and a genuinely-worse neighbour becomes indistinguishable from
+    the true k-th. Retrieved distances come back from hnswlib as float32 by
+    necessity; keeping the ground-truth side exact means ``atol`` in the recall
+    band covers the float32 noise floor once rather than twice. 8 MB per dataset.
+
+    Returns float64 in :data:`DIST_CONVENTION` units -- smaller is better.
     """
     if neighbors.shape[0] != queries.shape[0]:
         raise ValueError(
@@ -227,13 +235,13 @@ def gather_distances(
         )
 
     n_q, depth = neighbors.shape
-    out = np.empty((n_q, depth), dtype=np.float32)
+    out = np.empty((n_q, depth), dtype=np.float64)
 
     for qlo in range(0, n_q, query_block):
         qhi = min(qlo + query_block, n_q)
-        qb = np.ascontiguousarray(queries[qlo:qhi], dtype=np.float32)
+        qb = np.ascontiguousarray(queries[qlo:qhi], dtype=np.float64)
         # (block, depth, dim) -- bounded by query_block, not by n_base
-        nb = np.asarray(base[neighbors[qlo:qhi].ravel()], dtype=np.float32).reshape(
+        nb = np.asarray(base[neighbors[qlo:qhi].ravel()], dtype=np.float64).reshape(
             qhi - qlo, depth, -1
         )
         if space == "l2":

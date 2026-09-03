@@ -49,6 +49,7 @@ class DatasetStatus:
     verified: bool
     processed: bool
     ground_truthed: bool
+    gt_dists: bool
     n_base: int | None
     n_queries: int | None
     dim: int
@@ -56,6 +57,34 @@ class DatasetStatus:
     search_space: str
     resolved_nc: int | None
     bytes_on_disk: int
+
+    @property
+    def complete(self) -> bool:
+        """Every artifact this dataset needs before an index can be built.
+
+        Read by ``smartann data status``, which exits non-zero when any
+        registered dataset is incomplete. A status table that a human has to
+        eyeball is not an acceptance check: SQuAD sat with no ground truth
+        through a passing Phase 1 because ``gt: x`` was printed and read past.
+        """
+        return (
+            self.downloaded
+            and self.verified
+            and self.processed
+            and self.ground_truthed
+            and self.gt_dists
+        )
+
+    def missing(self) -> list[str]:
+        """The specific artifacts that are absent, for a useful failure message."""
+        checks = (
+            ("downloaded", self.downloaded),
+            ("verified", self.verified),
+            ("processed", self.processed),
+            ("groundtruth_top100.npy", self.ground_truthed),
+            ("groundtruth_dists_top100.npy", self.gt_dists),
+        )
+        return [label for label, ok in checks if not ok]
 
 
 def _raw_dir(paths: PathsConfig, name: str) -> Path:
@@ -314,6 +343,7 @@ def status_for(name: str, paths: PathsConfig | None = None) -> DatasetStatus:
     base_p = processed / "base.npy"
     queries_p = processed / "queries.npy"
     gt_p = processed / "groundtruth_top100.npy"
+    gtd_p = processed / "groundtruth_dists_top100.npy"
     is_processed = base_p.exists() and queries_p.exists()
 
     n_base = n_queries = None
@@ -331,6 +361,7 @@ def status_for(name: str, paths: PathsConfig | None = None) -> DatasetStatus:
         verified=verified,
         processed=is_processed,
         ground_truthed=gt_p.exists(),
+        gt_dists=gtd_p.exists(),
         n_base=n_base,
         n_queries=n_queries,
         dim=spec.dim,

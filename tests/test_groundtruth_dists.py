@@ -188,3 +188,40 @@ def test_monotonicity_tolerates_float_noise_at_the_tolerance() -> None:
     dists = np.tile(np.arange(10, dtype=np.float32), (50, 1))
     dists[0, 3] += 1e-7  # below tol, must not trip
     assert check_row_monotonic(dists, tol=1e-5).ok
+
+
+# ---------------------------------------------------------------------------
+# precision: float64 on the ground-truth side, deliberately
+# ---------------------------------------------------------------------------
+def test_gather_distances_returns_float64(data: tuple[np.ndarray, np.ndarray]) -> None:
+    """Asymmetric by design: exact truth, float32 retrieved, atol covers one floor."""
+    base, queries = data
+    nbrs = np.zeros((queries.shape[0], 4), dtype=np.int32)
+    assert gather_distances(base, queries, nbrs, "l2").dtype == np.float64
+
+
+def test_float32_cancellation_would_have_hidden_a_real_difference() -> None:
+    """Why float64: ``1 - cos`` loses the whole distance as cos approaches 1.
+
+    Two distinct unit vectors whose cosine differs at the 1e-8 level are
+    genuinely different neighbours. In float32 the subtraction collapses them
+    onto the same value, and a score-equality band would call a worse neighbour
+    correct -- an error in the direction that flatters us.
+    """
+    dim = 64
+    rng = np.random.default_rng(7)
+    q = rng.standard_normal(dim)
+    q /= np.linalg.norm(q)
+    # two neighbours at cosine 1 - 3e-8 and 1 - 9e-8: distinct, both far inside
+    # float32's 1.19e-07 resolution near 1.0
+    perp = rng.standard_normal(dim)
+    perp -= perp @ q * q
+    perp /= np.linalg.norm(perp)
+    base = np.stack([np.cos(t) * q + np.sin(t) * perp for t in (2.45e-4, 4.24e-4)])
+
+    exact = 1.0 - base @ q
+    assert exact[0] < exact[1], "the two neighbours must genuinely differ"
+
+    cheap = (1.0 - (base.astype(np.float32) @ q.astype(np.float32))).astype(np.float64)
+    assert cheap[0] == cheap[1], "float32 must collapse them -- that is the hazard"
+    assert exact[1] - exact[0] > 0, f"float64 keeps a gap of {exact[1] - exact[0]:.3e}"

@@ -78,6 +78,21 @@ class DataManifest:
         self._entries[rel] = asdict(rec)
         return rec
 
+    def annotate(self, path: Path, extra: dict[str, Any]) -> dict[str, Any]:
+        """Merge extra facts into an existing entry, keeping its checksum.
+
+        Some properties of an artifact are only measured later -- duplicate
+        counts need the whole array in memory, which the preparation pass has no
+        reason to pay for. Re-recording would mean re-hashing a 488 MB file to
+        add one integer.
+        """
+        rel = path.resolve().relative_to(self.data_root.resolve()).as_posix()
+        entry = self._entries.get(rel)
+        if entry is None:
+            raise KeyError(f"{rel} has no manifest entry to annotate")
+        entry["extra"] = {**entry.get("extra", {}), **extra}
+        return entry
+
     def get(self, path: Path) -> dict[str, Any] | None:
         rel = path.resolve().relative_to(self.data_root.resolve()).as_posix()
         return self._entries.get(rel)

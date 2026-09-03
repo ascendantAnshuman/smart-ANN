@@ -17,9 +17,11 @@ from smartann.data.registry import DatasetSpec
 
 __all__ = [
     "AnnDataset",
+    "DuplicateReport",
     "ZeroNormError",
     "ZeroNormReport",
     "drop_zero_norm_rows",
+    "duplicate_report",
     "l2_normalize",
     "load_processed",
     "read_ann_benchmarks_hdf5",
@@ -192,6 +194,45 @@ def drop_zero_norm_rows(x: np.ndarray) -> ZeroNormReport:
         keep_mask=keep_mask,
         dropped_indices=dropped,
         old_to_new=old_to_new,
+    )
+
+
+@dataclass(frozen=True)
+class DuplicateReport:
+    """How many rows of a matrix are byte-identical repeats of another row."""
+
+    n_rows: int
+    n_distinct: int
+    n_repeat_rows: int  # rows that are not the first member of their group
+    n_groups: int  # groups with more than one member
+    largest_group: int
+
+    @property
+    def repeat_fraction(self) -> float:
+        return self.n_repeat_rows / self.n_rows if self.n_rows else 0.0
+
+
+def duplicate_report(x: np.ndarray) -> DuplicateReport:
+    """Exact duplicate detection by raw bytes, not by distance.
+
+    Distance-based near-duplicate detection would beg the question this exists
+    to answer. ``1 - cos`` suffers catastrophic cancellation as ``cos -> 1``:
+    in float32, eps near 1.0 is 1.19e-07, so any two vectors whose cosine is
+    within that of 1.0 collapse to the same stored distance whether or not they
+    are the same vector. Comparing bytes is immune to that entirely -- it either
+    is the same vector or it is not.
+    """
+    if x.ndim != 2:
+        raise ValueError(f"expected a 2-D array, got shape {x.shape}")
+    rows = np.ascontiguousarray(x)
+    packed = rows.view(np.dtype((np.void, rows.dtype.itemsize * rows.shape[1]))).ravel()
+    _, counts = np.unique(packed, return_counts=True)
+    return DuplicateReport(
+        n_rows=int(rows.shape[0]),
+        n_distinct=int(counts.shape[0]),
+        n_repeat_rows=int(rows.shape[0] - counts.shape[0]),
+        n_groups=int(np.sum(counts > 1)),
+        largest_group=int(counts.max()) if counts.size else 0,
     )
 
 

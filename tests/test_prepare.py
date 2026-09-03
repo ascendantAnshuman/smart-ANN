@@ -217,3 +217,45 @@ def test_prepare_result_is_frozen() -> None:
 
     assert dataclasses.fields(PrepareResult)
     assert PrepareResult.__dataclass_params__.frozen is True  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# completeness is an exit code, not a table to read
+# ---------------------------------------------------------------------------
+def test_status_of_an_unprepared_dataset_is_incomplete() -> None:
+    s = status_for("sift1m", resolve_paths())
+    assert not s.complete
+    assert "downloaded" in s.missing()
+    assert "groundtruth_dists_top100.npy" in s.missing()
+
+
+def test_data_status_exits_non_zero_when_a_dataset_is_incomplete() -> None:
+    """The Phase 1 miss, as a test: SQuAD had no ground truth and Phase 1 passed."""
+    from typer.testing import CliRunner
+
+    from smartann.cli import app
+
+    result = CliRunner().invoke(app, ["data", "status"])
+    assert result.exit_code == 1, "an empty data root must fail, not merely print red"
+    assert "incomplete" in result.stdout
+
+
+def test_duplicate_report_counts_repeats_not_near_neighbours() -> None:
+    """Bytes, not distances -- distance-based detection begs the question."""
+    from smartann.data.readers import duplicate_report
+
+    rows = np.array([[1.0, 2.0], [1.0, 2.0], [1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)
+    rep = duplicate_report(rows)
+    assert rep.n_rows == 5
+    assert rep.n_distinct == 3
+    assert rep.n_repeat_rows == 2
+    assert rep.n_groups == 1
+    assert rep.largest_group == 3
+    assert rep.repeat_fraction == pytest.approx(0.4)
+
+
+def test_duplicate_report_does_not_merge_merely_close_rows() -> None:
+    from smartann.data.readers import duplicate_report
+
+    rows = np.array([[1.0, 2.0], [1.0, 2.0000002]], dtype=np.float32)
+    assert duplicate_report(rows).n_repeat_rows == 0

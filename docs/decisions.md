@@ -562,3 +562,97 @@ already hold.
 full base array back on the search path. Instead the merge uses the distances
 hnswlib already returned, so search touches the centroid graph and one cluster
 graph at a time — which is what MobileRAG's memory expression actually describes.
+
+---
+
+## ADR-0014 (amendment) — NYTimes duplicates are real, and they are not small
+
+**Status.** Accepted. Amends the zero-norm finding with a second, independent
+quirk of the same dataset.
+
+**The question.** Check 9 measured that 13.55% of NYTimes queries have a
+neighbour indistinguishable from the k-th at k=10, one of them with 85 of them.
+Two explanations, with opposite consequences:
+
+- **Real duplicate vectors.** Score-equality recall is correct, the band is
+  doing its job, and the tie rate is a property of the corpus.
+- **Float32 cancellation.** `one_minus_ip` computes `1 - cos`, and float32 eps
+  near 1.0 is 1.19e-07, so *any* pair with cosine within that of 1.0 collapses
+  to the same stored value whether or not the vectors are the same. Ground truth
+  would then be unreliable exactly where it is being used as a threshold, and
+  the metric would credit genuinely-worse neighbours — inflating recall in the
+  direction that flatters us.
+
+**Settled by measurement, three independent ways.** Byte comparison cannot be
+fooled by cancellation:
+
+| dataset | rows that repeat a previous row | groups | largest group | ties at k=10 | max extra |
+|---|---|---|---|---|---|
+| sift1m  | 14,538 / 1,000,000 (1.454%)  | 14,538 | 2  | 1.37%  | 1  |
+| nytimes | 40,793 / 289,761 (14.078%)   | 26,557 | 95 | 13.55% | 85 |
+| squad   | 11 / 46,369 (0.024%)         | 11     | 2  | 0.30%  | 1  |
+
+1. **Bytes.** One in seven NYTimes base vectors is a byte-identical repeat.
+2. **Full precision.** The worst query (1264) has 95 tied neighbours which are
+   *one* distinct byte pattern; recomputing in float64 gives a spread of
+   2.22e-16, i.e. float64 rounding on identical inputs, not a real difference.
+3. **Correspondence.** The tie rate tracks the duplicate rate on all three
+   datasets independently, and the maximum tie count tracks the maximum
+   duplicate-group size. Cancellation would predict no such relationship.
+
+**Verdict: the duplicates are real.** Score-equality recall is measuring a true
+property of the corpus. Both numbers go in the dataset table.
+
+Note also that the raw pre-normalisation NYTimes array has a largest duplicate
+group of **239** — exactly the 239 all-zero rows of the original zero-norm
+finding. After dropping them the largest group is 95. The two quirks are
+consistent with each other.
+
+**Consequence for Phase 6 — a known constraint, not solved here.** The planned
+`recall_proxy` uses score margin (the gap between the k-th and (k+1)-th
+candidate) as a runtime confidence signal. On NYTimes that margin is **exactly
+zero by construction for one query in seven**, so the proxy is degenerate on
+precisely those queries and the bandit would be learning from a structurally
+uninformative signal. Recorded now because rediscovering it in Phase 6 as
+mysterious single-dataset controller underperformance would cost days. Not
+solved now because the shadow-sampling path may cover it and the right fix
+depends on Phase 6 numbers that do not exist yet.
+
+**Precision consequence.** Ground-truth distances are stored as **float64**
+(8 MB per dataset), computed in float64 throughout. Retrieved distances come
+back from hnswlib as float32 by necessity, and the asymmetry is deliberate: it
+puts the precision where the recall band needs it, so `atol` covers the float32
+noise floor once rather than being swamped by noise on both sides. Recorded per
+artifact as `dtype` / `retrieved_side_dtype`. Switching to float64 halved
+NYTimes' worst monotonicity violation, from -5.96e-08 to -2.61e-08.
+
+---
+
+## ADR-0020 — An acceptance check a human has to read is not an acceptance check
+
+**Status.** Accepted. Applies to every phase from here.
+
+**Context.** Phase 1 closed with SQuAD having no ground truth at all. Check 1
+was "run `smartann data status` and confirm all three are fully prepared" — the
+table printed `gt: x`, it was read past, and the phase passed. Nothing caught it
+until an unrelated Phase 2 check went looking for a file that should have been
+beside it. The cost was never the compute; recomputing took five seconds. The
+cost was that only luck surfaced it.
+
+**Decision.**
+
+1. `smartann data status` **exits non-zero** when any registered dataset is
+   incomplete, naming the missing artifacts. `DatasetStatus.complete` and
+   `.missing()` define completeness in one place.
+2. `scripts/phase1_acceptance.py` runs the command as a subprocess and asserts
+   its **exit code**. It does not parse the table.
+3. Every Phase 2 acceptance check produces a pass/fail verdict of its own.
+   Measurements that are genuinely not pass/fail (probe cost, tie structure,
+   resident footprint) still print their numbers, but each carries an explicit
+   verdict against a stated threshold rather than leaving the judgement to the
+   reader.
+
+**Consequence.** `data status` now fails on a fresh checkout with no data, which
+is correct — nothing is prepared. The Phase 0 test that asserted exit 0 on an
+empty root was updated to assert exit 1 plus a rendered table; its real intent
+was "does not crash", which still holds.

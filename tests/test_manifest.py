@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from smartann.bench.manifest import Manifest, git_state, library_versions
 from smartann.config import config_hash
 from smartann.types import AnnConfig, PipelineConfig, ScrConfig
@@ -81,3 +83,28 @@ def test_git_state_reports_availability() -> None:
 def test_library_versions_marks_absent_packages() -> None:
     v = library_versions(("numpy", "definitely-not-a-real-package"))
     assert v["definitely-not-a-real-package"] == "not-installed"
+
+
+def test_annotate_merges_without_rehashing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Duplicate counts are measured later; re-recording would re-hash 488 MB."""
+    from smartann.data.manifest import DataManifest
+
+    f = tmp_path / "base.npy"
+    f.write_bytes(b"x" * 32)
+    m = DataManifest(tmp_path)
+    m.record(f, dataset="d", stage="processed", sha256="abc", extra={"n": 1})
+
+    m.annotate(f, {"duplicate_rows": 7})
+    entry = m.get(f)
+    assert entry is not None
+    assert entry["sha256"] == "abc"
+    assert entry["extra"] == {"n": 1, "duplicate_rows": 7}
+
+
+def test_annotate_refuses_an_unrecorded_path(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from smartann.data.manifest import DataManifest
+
+    f = tmp_path / "ghost.npy"
+    f.write_bytes(b"x")
+    with pytest.raises(KeyError, match="no manifest entry"):
+        DataManifest(tmp_path).annotate(f, {"a": 1})
