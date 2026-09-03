@@ -17,8 +17,10 @@ from smartann.config import PathsConfig, resolve_paths
 from smartann.data.download import fetch, sha256_file
 from smartann.data.manifest import DataManifest
 from smartann.data.readers import (
+    drop_zero_norm_rows,
     l2_normalize,
     read_ann_benchmarks_hdf5,
+    remap_neighbors,
 )
 from smartann.data.registry import DatasetSpec, load_registry, record_checksum, spec_for
 
@@ -127,7 +129,28 @@ def _process_ann(
 
     base = ds.train
     queries = ds.test
+    neighbors = ds.neighbors
+    dropped: dict[str, Any] = {"base": 0, "queries": 0}
+
     if spec.normalized:
+        # Zero-norm rows have no direction. They cannot be normalised, and under
+        # inner-product search they would score 0.0 and outrank every genuinely
+        # anti-correlated vector. Drop them explicitly and remap the shipped
+        # ground truth (ADR-0014).
+        base_report = drop_zero_norm_rows(base)
+        if base_report.n_dropped:
+            neighbors = remap_neighbors(neighbors, base_report.old_to_new)
+            dropped["base"] = base_report.n_dropped
+        base = base_report.kept
+
+        query_report = drop_zero_norm_rows(queries)
+        if query_report.n_dropped:
+            # A zero-norm query is unanswerable: ANN-Benchmarks itself records
+            # NaN distances for these. Drop the query and its ground-truth row.
+            neighbors = neighbors[query_report.keep_mask]
+            dropped["queries"] = query_report.n_dropped
+        queries = query_report.kept
+
         base = l2_normalize(base, f"{spec.name}/base")
         queries = l2_normalize(queries, f"{spec.name}/queries")
 
@@ -136,7 +159,7 @@ def _process_ann(
     for arr, filename in (
         (base, "base.npy"),
         (queries, "queries.npy"),
-        (ds.neighbors, "groundtruth_top100.npy"),
+        (neighbors, "groundtruth_top100.npy"),
     ):
         p = out_dir / filename
         np.save(p, arr)
@@ -153,6 +176,7 @@ def _process_ann(
                 "derived_from": raw_paths["hdf5"].name,
                 "normalized": spec.normalized,
                 "hdf5_distance": ds.distance_attr,
+                "dropped_zero_norm": dropped,
             },
         )
 
@@ -169,7 +193,11 @@ def _process_ann(
         details={
             "hdf5_distance": ds.distance_attr,
             "normalized_at_write": spec.normalized,
-            "groundtruth_depth": int(ds.neighbors.shape[1]),
+            "groundtruth_depth": int(neighbors.shape[1]),
+            "file_n_base": int(ds.train.shape[0]),
+            "file_n_queries": int(ds.test.shape[0]),
+            "dropped_zero_norm_base": dropped["base"],
+            "dropped_zero_norm_queries": dropped["queries"],
         },
     )
 

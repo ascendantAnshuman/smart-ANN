@@ -68,3 +68,50 @@ def test_per_dataset_accounting(tmp_path: Path) -> None:
     assert m.total_bytes("y") == 50
     assert m.total_bytes() == 150
     assert len(m.for_dataset("x")) == 1
+
+
+def test_concurrent_writers_do_not_clobber_each_other(tmp_path: Path) -> None:
+    """The NYTimes/SQuAD lost-update race, reproduced.
+
+    Two preparations running in parallel each build a manifest, add their own
+    artifacts, and write at the end. Without merge-on-write the later writer
+    erases the earlier one's entries -- which is exactly what removed NYTimes'
+    four artifacts from the real manifest.
+    """
+    a_file = _touch(tmp_path / "raw" / "a.bin")
+    b_file = _touch(tmp_path / "raw" / "b.bin")
+
+    first = DataManifest(tmp_path)
+    second = DataManifest(tmp_path)  # constructed before either has written
+
+    first.record(a_file, dataset="alpha", stage="raw", sha256="a" * 64)
+    second.record(b_file, dataset="beta", stage="raw", sha256="b" * 64)
+
+    first.write()
+    second.write()  # must not erase alpha
+
+    final = DataManifest(tmp_path)
+    assert final.get(a_file) is not None, "the earlier writer's entry was clobbered"
+    assert final.get(b_file) is not None
+    assert final.unrecorded_files() == []
+
+
+def test_write_recovers_from_a_corrupt_manifest(tmp_path: Path) -> None:
+    (tmp_path / DataManifest.FILENAME).write_text("{not json", encoding="utf-8")
+    f = _touch(tmp_path / "raw" / "a.bin")
+
+    m = DataManifest(tmp_path)
+    m.record(f, dataset="x", stage="raw", sha256="c" * 64)
+    m.write()
+
+    assert DataManifest(tmp_path).get(f) is not None
+
+
+def test_write_leaves_no_temp_file_behind(tmp_path: Path) -> None:
+    f = _touch(tmp_path / "raw" / "a.bin")
+    m = DataManifest(tmp_path)
+    m.record(f, dataset="x", stage="raw", sha256="d" * 64)
+    m.write()
+
+    assert not (tmp_path / (DataManifest.FILENAME + ".tmp")).exists()
+    assert m.unrecorded_files() == []

@@ -297,3 +297,104 @@ brief says adding a dataset should be "a config entry and a chunker call".
 filename, urls)`, each independently checksummed and recorded. Single-artifact
 datasets are the common case and read naturally; multi-artifact ones need no
 special handling.
+
+---
+
+## ADR-0014 — Zero-norm vectors are dropped from cosine datasets, not repaired
+
+**Date:** 2026-09-03 · **Phase:** 1 · **Status:** accepted
+
+Preparing NYTimes surfaced a property of the dataset rather than a bug in the
+code: **239 of its 290,000 base vectors and 9 of its 10,000 query vectors have
+exactly zero norm.** It is a bag-of-words-derived set, so some rows carry no
+surviving terms. Measured facts, not assumptions:
+
+- Non-zero norms cluster tightly around 1.0 (median 0.999154, range
+  0.807-1.204) -- the set is *approximately* but not exactly normalised.
+- The zero rows appear **nowhere** in the shipped top-100 `neighbors` array:
+  0 occurrences across all 10,000 x 100 entries.
+- The shipped `distances` array contains **NaN**, produced by the 9 zero-norm
+  *queries*. ANN-Benchmarks did not resolve this either.
+
+A zero vector has no direction. It cannot be normalised, its cosine distance to
+everything is undefined, and -- the part that actually bites -- under an
+inner-product search it scores exactly 0.0, which ranks it *above* every
+genuinely anti-correlated vector. Left in the index it does not waste a slot, it
+displaces correct results and depresses measured recall for reasons unrelated to
+the retrieval system being studied.
+
+**Decision.** Drop them explicitly during preparation, and remap the shipped
+ground truth into the compacted index space. Because no neighbour list
+references a dropped row, the remapping is lossless and no neighbour list
+becomes ragged; `remap_neighbors` raises rather than truncating if that ever
+stops being true. Zero-norm *queries* are dropped along with their ground-truth
+rows, since they are unanswerable by construction.
+
+`l2_normalize` continues to *raise* on zero-norm input. Dropping is an explicit,
+recorded step in `prepare.py`, never a silent side effect of normalisation, and
+the dropped counts go into `MANIFEST.json` and the prepare report.
+
+**Consequences.** NYTimes' usable counts differ from its file counts. The
+registry's `expected_n_base` / `expected_n_queries` continue to describe the
+*file* (that is what the reader asserts against), while the processed artifacts
+and the manifest record the usable counts. Both numbers must appear in the
+paper's dataset table.
+
+**Alternatives.**
+- Substitute a unit vector for each zero row -- rejected outright: it fabricates
+  data, which Section 3 rule 1 forbids.
+- Keep them and search with hnswlib's `cosine` space -- rejected: it divides by
+  the zero norm, and k-means over non-unit vectors would disagree with the
+  search metric anyway.
+- Leave them un-normalised in an `ip` index -- rejected: this is the case that
+  silently displaces correct results.
+
+---
+
+## ADR-0015 — No test may assert on unimplemented behaviour without the isolation fixtures
+
+**Date:** 2026-09-03 · **Phase:** 1 · **Status:** accepted
+
+A Phase 0 test asserted that `smartann data prepare squad` raises
+`NotImplementedError`. When Phase 1 implemented that subcommand, the assertion
+did not merely start failing -- the test **executed the command**. It downloaded
+35 MB, began writing a chunk database into the developer's real data root, and
+left two orphaned pytest processes running for hours holding a SQLite lock. A
+test that encodes "this does not work yet" becomes a live-fire command the
+moment it does.
+
+**Decision.** `tests/conftest.py` applies two autouse fixtures to every test:
+
+- `isolate_data_roots` points `SMARTANN_DATA_ROOT` and
+  `SMARTANN_RESULTS_ROOT` at a per-test temporary directory, so no test can
+  write to real data even if it invokes a fully implemented command.
+- `no_accidental_network` replaces `requests.get`/`head` with a raiser unless
+  the test carries the `slow` marker. Tests that mock `requests.get` themselves
+  are unaffected, since their patch applies after this one.
+
+**Standing rule.** No test may assert on unimplemented behaviour without those
+fixtures in force, and any name removed from the `STUBS` list in
+`tests/test_cli.py` must gain real coverage in the same commit. The `STUBS` list
+carries a comment recording this incident so the reason survives.
+
+---
+
+## ADR-0016 — MANIFEST.json merges on write; concurrent preparations are safe
+
+**Date:** 2026-09-03 · **Phase:** 1 · **Status:** accepted
+
+`DataManifest` read the file at construction and overwrote it at the end. Two
+preparations running concurrently therefore raced: NYTimes and SQuAD were
+prepared in parallel, SQuAD constructed its manifest before NYTimes finished,
+and SQuAD's write erased all four of NYTimes' artifact entries. Phase 1
+acceptance check 7 is what caught it -- a manifest completeness check earns its
+keep the first time something like this happens.
+
+**Decision.** `write()` re-reads the on-disk artifacts and merges its own
+entries over them, so a concurrent writer's records survive. The write goes to a
+temporary file and is then renamed, so an interrupted write cannot leave a
+partial manifest. `_read_artifacts` tolerates a corrupt file rather than making
+the whole pipeline unrunnable: recording what we know beats recording nothing.
+
+Tests reproduce the exact lost-update sequence, the corrupt-file recovery, and
+the absence of a leftover temp file.

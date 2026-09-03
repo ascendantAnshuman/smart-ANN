@@ -18,11 +18,14 @@ from smartann.data.registry import DatasetSpec
 __all__ = [
     "AnnDataset",
     "ZeroNormError",
+    "ZeroNormReport",
+    "drop_zero_norm_rows",
     "l2_normalize",
     "load_processed",
     "read_ann_benchmarks_hdf5",
     "read_fvecs",
     "read_ivecs",
+    "remap_neighbors",
 ]
 
 
@@ -149,6 +152,66 @@ def read_ann_benchmarks_hdf5(path: str | Path, spec: DatasetSpec) -> AnnDataset:
 # ---------------------------------------------------------------------------
 # Normalisation
 # ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ZeroNormReport:
+    """What ``drop_zero_norm_rows`` removed, so preparation can record it."""
+
+    kept: np.ndarray  # (n_kept, dim) the surviving vectors
+    keep_mask: np.ndarray  # (n,) bool
+    dropped_indices: np.ndarray  # (n_dropped,) int64, into the ORIGINAL array
+    old_to_new: np.ndarray  # (n,) int64; -1 where dropped
+
+    @property
+    def n_dropped(self) -> int:
+        return int(self.dropped_indices.size)
+
+
+def drop_zero_norm_rows(x: np.ndarray) -> ZeroNormReport:
+    """Remove zero-norm rows and return the mapping needed to remap references.
+
+    A zero vector has no direction, so under cosine it is similar to nothing and
+    its distance to everything is undefined. Worse, under an inner-product
+    search it scores exactly 0.0, which ranks it *above* every genuinely
+    anti-correlated vector -- so leaving it in the index does not merely waste a
+    slot, it displaces correct results.
+
+    NYTimes ships 239 such rows in its base set and 9 in its query set. Dropping
+    them is an explicit, recorded decision made here; :func:`l2_normalize`
+    deliberately still refuses to normalise them, so nothing can remove them by
+    accident.
+    """
+    norms = np.linalg.norm(np.asarray(x, dtype=np.float32), axis=1)
+    keep_mask = norms > 0.0
+    dropped = np.flatnonzero(~keep_mask).astype(np.int64)
+
+    old_to_new = np.full(x.shape[0], -1, dtype=np.int64)
+    old_to_new[keep_mask] = np.arange(int(keep_mask.sum()), dtype=np.int64)
+
+    return ZeroNormReport(
+        kept=np.ascontiguousarray(x[keep_mask], dtype=np.float32),
+        keep_mask=keep_mask,
+        dropped_indices=dropped,
+        old_to_new=old_to_new,
+    )
+
+
+def remap_neighbors(neighbors: np.ndarray, old_to_new: np.ndarray) -> np.ndarray:
+    """Rewrite neighbour indices into a compacted base set.
+
+    Raises if any neighbour referred to a dropped row: that would make the
+    ground truth ragged, and silently truncating it would overstate recall.
+    """
+    remapped = old_to_new[neighbors]
+    if np.any(remapped < 0):
+        n_bad = int(np.count_nonzero(remapped < 0))
+        raise ValueError(
+            f"ground truth references {n_bad} dropped row(s); compacting the base set "
+            "would make the neighbour lists ragged. Refusing to truncate them."
+        )
+    out: np.ndarray = remapped.astype(np.int32)
+    return out
+
+
 def l2_normalize(x: np.ndarray, name: str = "vectors") -> np.ndarray:
     """L2-normalise rows, refusing to invent a direction for zero vectors.
 

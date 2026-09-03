@@ -6,17 +6,16 @@ value in the meantime.
 
 Keep this file in sync when a stub is filled in or a new one is added.
 
-## Phase 1 — Datasets, embeddings, ground truth
-
-- `smartann/cli.py::data_status` — dataset status table; needs the Phase 1 dataset registry.
-- `smartann/cli.py::data_prepare` — download/verify/chunk; needs the Phase 1 loaders.
-- `smartann/cli.py::data_groundtruth` — exact top-100 brute force; needs the Phase 1 loaders.
-
 ## Phase 2 — EcoVector index
 
 - `smartann/cli.py::index_build` — EcoVector build; needs `hnswlib`, which does **not**
   currently install on this machine (no MSVC toolchain — see README hardware caveat).
 - `smartann/cli.py::index_info` — index metadata + memory model; blocked on the same.
+
+## Phase 3.5 — On-device trace capture (ADR-0008)
+
+- `smartann/telemetry/android.py` — Termux sysfs sampler; not written yet.
+- Trace capture script; blocked on the phone, not on code.
 
 ## Phase 8 — Benchmark harness
 

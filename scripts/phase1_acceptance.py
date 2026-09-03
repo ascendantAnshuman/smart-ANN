@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+from functools import partial
 
 import numpy as np
 import psutil
@@ -62,13 +63,116 @@ def check2_sift_groundtruth_selfcheck(n_queries: int = 200, k: int = 10) -> None
     shipped = np.asarray(truth[np.sort(idx), :k], dtype=np.int32)
     exact = bool(np.array_equal(best_idx, shipped))
     overlap = np.mean([len(set(a) & set(b_)) / k for a, b_ in zip(best_idx, shipped, strict=True)])
-    report(
-        "2. SIFT1M ground-truth self-check",
-        exact,
+
+    detail = (
         f"{n_queries} random queries, top-{k}: "
-        f"{'exact positional agreement' if exact else 'MISMATCH'} with the shipped "
-        f"neighbors array; mean set overlap {overlap:.4f}",
+        f"{'exact positional agreement' if exact else 'positional MISMATCH'} with the "
+        f"shipped neighbors array; mean set overlap {overlap:.4f}"
     )
+    ok = exact
+    if not exact:
+        # A mismatch is only a bug if it means we found *worse* neighbours. If
+        # every disagreement is an exact distance tie, the two answers are
+        # equally correct and differ only in tie-breaking convention. Diagnose
+        # rather than assert, so the failure mode is identifiable at a glance.
+        ties, deficit = _diagnose_disagreement(base, q, best_idx, shipped, larger_is_better=False)
+        ok = ties and deficit <= 0.0
+        detail += (
+            f"\n       diagnosis: every disagreement is an exact distance tie: {ties}"
+            f"\n       max quality deficit of our result vs shipped: {deficit:.3e}"
+            f"\n       => {'equally correct, tie-break convention only' if ok else 'GENUINELY WORSE -- metric or normalisation is wrong'}"
+        )
+    report("2. SIFT1M ground-truth self-check", ok, detail)
+
+
+def _score(q64: np.ndarray, base: np.ndarray, larger_is_better: bool, j: int) -> float:
+    """Exact float64 score of base row *j* against query *q64*.
+
+    Module level, with the candidate index last so callers can bind the query
+    eagerly via functools.partial rather than closing over a loop variable.
+    float64 so the tie verdict is not itself a rounding artifact.
+    """
+    v = base[j].astype(np.float64)
+    return float(q64 @ v) if larger_is_better else float(np.sum((q64 - v) ** 2))
+
+
+def _diagnose_disagreement(
+    base: np.ndarray,
+    queries: np.ndarray,
+    ours: np.ndarray,
+    theirs: np.ndarray,
+    larger_is_better: bool,
+) -> tuple[bool, float]:
+    """Are two top-k answers equally good? Returns (all_ties, max_deficit).
+
+    Computed in float64 so the verdict is not itself a rounding artifact.
+    """
+    all_ties = True
+    max_deficit = 0.0
+    for i in range(queries.shape[0]):
+        extra = set(ours[i].tolist()) - set(theirs[i].tolist())
+        missing = set(theirs[i].tolist()) - set(ours[i].tolist())
+        if not extra:
+            continue
+        # partial binds this iteration's query eagerly
+        score = partial(_score, queries[i].astype(np.float64), base, larger_is_better)
+
+        for a in extra:
+            for b in missing:
+                if abs(score(a) - score(b)) > 0.0:
+                    all_ties = False
+        ours_total = sum(score(j) for j in ours[i].tolist())
+        theirs_total = sum(score(j) for j in theirs[i].tolist())
+        deficit = (theirs_total - ours_total) if larger_is_better else (ours_total - theirs_total)
+        max_deficit = max(max_deficit, deficit)
+    return all_ties, max_deficit
+
+
+def check3b_nytimes_groundtruth_selfcheck(n_queries: int = 200, k: int = 10) -> None:
+    """Same self-check for NYTimes, which additionally exercises the remapping."""
+    paths = resolve_paths()
+    d = paths.processed / "nytimes"
+    base = load_processed(d, "base")
+    queries = load_processed(d, "queries")
+    truth = load_processed(d, "groundtruth")
+
+    rng = np.random.default_rng(0)
+    idx = np.sort(rng.choice(queries.shape[0], n_queries, replace=False))
+    q = np.ascontiguousarray(queries[idx], dtype=np.float32)
+
+    best = np.full((n_queries, k), -np.inf, dtype=np.float32)
+    best_idx = np.full((n_queries, k), -1, dtype=np.int32)
+    for lo in range(0, base.shape[0], 50_000):
+        hi = min(lo + 50_000, base.shape[0])
+        b = np.ascontiguousarray(base[lo:hi], dtype=np.float32)
+        s = q @ b.T
+        ci = np.broadcast_to(np.arange(lo, hi, dtype=np.int32)[None, :], s.shape)
+        ms = np.concatenate([best, s], 1)
+        mi = np.concatenate([best_idx, ci], 1)
+        order = np.lexsort((mi, -ms), axis=1)[:, :k]
+        rows = np.arange(n_queries)[:, None]
+        best, best_idx = ms[rows, order], mi[rows, order]
+
+    shipped = np.asarray(truth[idx, :k], dtype=np.int32)
+    exact = bool(np.array_equal(best_idx, shipped))
+    overlap = np.mean([len(set(a) & set(b_)) / k for a, b_ in zip(best_idx, shipped, strict=True)])
+
+    detail = (
+        f"{n_queries} random queries, top-{k} on the COMPACTED base "
+        f"({base.shape[0]:,} vectors after dropping 239 zero-norm rows): "
+        f"{'exact positional agreement' if exact else 'positional MISMATCH'}; "
+        f"mean set overlap {overlap:.4f}"
+    )
+    ok = exact
+    if not exact:
+        ties, deficit = _diagnose_disagreement(base, q, best_idx, shipped, larger_is_better=True)
+        ok = ties and deficit <= 0.0
+        detail += (
+            f"\n       diagnosis: every disagreement is an exact cosine tie: {ties}"
+            f"\n       max quality deficit of our result vs shipped: {deficit:.3e}"
+            f"\n       => {'equally correct; NYTimes contains duplicate/collinear vectors' if ok else 'GENUINELY WORSE -- remapping is wrong'}"
+        )
+    report("3b. NYTimes ground-truth self-check (validates the remap)", ok, detail)
 
 
 def check3_nytimes_metric() -> None:
@@ -215,6 +319,7 @@ def summary() -> None:
 def main() -> int:
     check2_sift_groundtruth_selfcheck()
     check3_nytimes_metric()
+    check3b_nytimes_groundtruth_selfcheck()
     check4_qa_round_trip()
     check5_mmap_does_not_double_rss()
     check7_manifest_completeness()

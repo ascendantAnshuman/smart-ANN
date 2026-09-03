@@ -57,15 +57,16 @@ Query ─► Embed ─► Cheap centroid probe ─► FEATURE VECTOR ─► CONT
 | Phase | Scope | State |
 |-------|-------|-------|
 | 0 | Scaffold, contracts, config, manifest | **done** |
-| 1 | Datasets, embeddings, ground truth | not started |
+| 1 | Datasets, embeddings, ground truth | **done** |
 | 2 | EcoVector index | not started |
 | 3 | Telemetry and cost model | not started |
+| 3.5 | On-device trace capture (ADR-0008) | not started |
 | 4 | Device simulator | not started |
 | 5 | Selective Content Reduction | not started |
 | 6 | Controller framework and policies | not started |
 | 7 | Full RAG pipeline | not started |
 | 8 | Benchmark harness and experiments | not started |
-| 9 | Android / real-device validation | not started |
+| 9 | Android end-to-end validation | not started |
 | 10 | Paper artifacts | not started |
 
 Unimplemented entry points raise `NotImplementedError` and are listed in
@@ -115,6 +116,42 @@ energy, and the only thing that can calibrate the simulator's thermal constants.
 
 Building the index additionally requires the MSVC C++ Build Tools, since
 `hnswlib` ships no Windows wheels -- see TODO.md for the one-line install.
+
+## Datasets
+
+The registry (`smartann/data/registry.py`) is the single source of truth for
+every dataset fact, most importantly the distance metric. Phase 2's index config
+reads `space` from the registry rather than declaring its own -- two independent
+declarations of the metric is the bug that silently halves recall (ADR-0010).
+
+| dataset | kind | dim | metric | normalised | search space | base vectors | queries | Nc |
+|---|---|---|---|---|---|---|---|---|
+| `sift1m` | ann | 128 | euclidean | no | `l2` | 1,000,000 | 10,000 | 2000 (pinned) |
+| `nytimes` | ann | 256 | angular | yes | `ip` | 289,761 | 9,991 | auto |
+| `squad` | qa | 384 | cosine | yes | `ip` | (chunked) | 1,000 | auto |
+
+`search_space` is derived, never stored: on unit-norm vectors cosine and inner
+product induce the same ordering, so a normalised cosine dataset is searched as
+`ip`, and k-means becomes spherical k-means.
+
+**NYTimes counts differ from its file counts.** The distributed HDF5 holds
+290,000 base and 10,000 query vectors, but 239 base rows and 9 query rows have
+exactly zero norm -- it is a bag-of-words-derived set and those rows retain no
+terms. They are dropped during preparation and the shipped ground truth is
+remapped into the compacted index space; the drop is lossless because no
+neighbour list references a dropped row. See ADR-0014 for why keeping them would
+have displaced correct results rather than merely wasted index slots.
+
+**NYTimes contains exact duplicate vectors.** Brute-force top-10 disagrees with
+the shipped `neighbors` array on about 2.6% of positions, and every one of those
+disagreements is an exact cosine tie (measured gap 0.000e+00 in float64), with
+our result never worse. Recall against this ground truth therefore has a small
+tie-breaking artifact; Phase 8's recall metric needs to be tie-aware.
+
+**SQuAD chunk counts do not match MobileRAG's reported 87,599** and are not
+tuned to. That figure is SQuAD's question count, and the paper does not state
+its chunking policy; ours is a 3-sentence sliding window with 1 sentence of
+overlap over the union of unique train and dev contexts (ADR-0009).
 
 ## Quickstart
 

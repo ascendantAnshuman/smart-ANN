@@ -39,8 +39,21 @@ class DataManifest:
         self.path = self.data_root / self.FILENAME
         self._entries: dict[str, dict[str, Any]] = {}
         if self.path.exists():
+            self._entries = self._read_artifacts()
+
+    def _read_artifacts(self) -> dict[str, dict[str, Any]]:
+        """Artifacts currently on disk, tolerating a corrupt file.
+
+        A manifest damaged by an interrupted write must not make the whole
+        pipeline unrunnable: recording what we know beats recording nothing.
+        The atomic write in :meth:`write` makes this rare, not impossible.
+        """
+        try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
-            self._entries = loaded.get("artifacts", {})
+        except (json.JSONDecodeError, OSError):
+            return {}
+        artifacts = loaded.get("artifacts", {})
+        return artifacts if isinstance(artifacts, dict) else {}
 
     def record(
         self,
@@ -85,7 +98,7 @@ class DataManifest:
 
     def unrecorded_files(self, patterns: tuple[str, ...] = ("**/*",)) -> list[str]:
         """Files under the data root with no manifest entry."""
-        skip = {self.FILENAME, ".gitkeep"}
+        skip = {self.FILENAME, ".gitkeep", self.FILENAME + ".tmp"}
         out: list[str] = []
         for pattern in patterns:
             for p in self.data_root.glob(pattern):
@@ -100,11 +113,32 @@ class DataManifest:
         return sorted(out)
 
     def write(self) -> Path:
+        """Merge our entries onto whatever is on disk, then write.
+
+        Re-reading first is not belt-and-braces, it is required. Two dataset
+        preparations running concurrently each construct a manifest, add their
+        own artifacts, and write at the end; a plain overwrite means the later
+        writer silently erases the earlier one's entries. That is exactly what
+        happened when NYTimes and SQuAD were prepared in parallel -- NYTimes'
+        four artifacts vanished from the manifest, and the unrecorded-files
+        check caught it. Ours win for keys we touched; everything else on disk
+        survives.
+        """
         self.data_root.mkdir(parents=True, exist_ok=True)
+
+        merged: dict[str, dict[str, Any]] = {}
+        if self.path.exists():
+            merged.update(self._read_artifacts())
+        merged.update(self._entries)
+        self._entries = merged
+
         payload = {
             "schema": 1,
             "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "artifacts": self._entries,
+            "artifacts": merged,
         }
-        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        # Write-then-rename so a crash mid-write cannot leave a partial manifest.
+        tmp = self.path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(self.path)
         return self.path
