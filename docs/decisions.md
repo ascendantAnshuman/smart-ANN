@@ -118,10 +118,43 @@ signal the controller consumes would be unavailable. Native Windows at least
 provides frequency ratio, battery percentage, charging state and battery
 discharge power.
 
-**Decision (provisional).** Develop on native Windows and install the MSVC C++
-Build Tools to unblock `hnswlib`. Revisit if that install is refused, in which
-case WSL2 becomes a compute-only environment and *all* telemetry comes from the
-simulator plus the Phase 9 device.
+**Decision.** Develop on native Windows and install the MSVC C++ Build Tools
+(`Microsoft.VisualStudio.2022.BuildTools`, VCTools workload) to unblock
+`hnswlib`. Confirmed 2026-09-03; status raised from provisional to accepted.
+This also unblocks `llama-cpp-python` for Phase 7, which has the same build
+requirement.
 
-**Status is provisional** pending the toolchain decision; this entry will be
-updated to accepted or superseded once made.
+---
+
+## ADR-0007 — The dev machine is model-only; measured energy and temperature come from Phase 9
+
+**Date:** 2026-09-03 · **Phase:** 0 · **Status:** accepted
+
+This laptop can measure neither CPU temperature nor energy. WMI's
+`MSAcpi_ThermalZoneTemperature` returns *Access denied*; there is no RAPL on
+Windows without a kernel driver; WSL2 exposes no thermal zones and an empty
+powercap directory. LibreHardwareMonitor would recover both, but only by
+installing a signed kernel driver (WinRing0) running with admin privileges.
+
+**Decision.** Decline the driver. On the dev machine `energy_mj_measured` stays
+`None` and `temperature_c` comes from the simulator; no code path substitutes a
+modelled value for a measured one (Section 3, rule 1). An Android device is
+available, so Phase 9 becomes **required** rather than optional: it is the sole
+source of measured temperature and battery-current energy, and therefore the
+only thing that can calibrate the simulator's `R_th`, `C_th`, `P_idle` and
+`P_dyn`.
+
+**Consequences.**
+- Phase 3's energy MAPE < 25% acceptance check **cannot be evaluated here**. The
+  latency MAPE < 15% check can. Both facts get reported in
+  `results/calibration/report.md` rather than quietly dropped.
+- Energy calibration moves to the Phase 9 device, using integrated battery
+  discharge current over sustained unplugged runs.
+- Phase 9 targets Termux (Path A): on-device Python reading
+  `/sys/class/thermal/thermal_zone*/temp` and
+  `/sys/class/power_supply/battery/current_now`. No `adb` needed from the PC.
+
+**Alternatives.** Install LibreHardwareMonitor — rejected: an admin kernel
+driver is a heavy dependency outside Section 4's list, to rescue a machine that
+is not the paper's target platform anyway. Report modelled energy as if
+measured — never considered; it is precisely what rule 1 forbids.

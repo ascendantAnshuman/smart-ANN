@@ -25,13 +25,25 @@ Keep this file in sync when a stub is filled in or a new one is added.
 
 ## Known blockers (not stubs)
 
-- **`hnswlib` cannot be installed here.** No binary wheels exist on PyPI and the
-  source build requires MSVC ≥ 14.0, which is not present (the `VS 2019`
-  directory on this machine contains no `cl.exe`). Phase 2 is blocked until
-  either the C++ Build Tools are installed or the project moves to WSL2.
-- **No measured energy or CPU temperature on the dev machine.** Phase 3's energy
-  MAPE acceptance check cannot be satisfied here; only the latency check can.
-  See README "Hardware caveat".
+- **`hnswlib` cannot be installed until the MSVC C++ Build Tools are present.**
+  No binary wheels exist on PyPI and the source build requires MSVC ≥ 14.0; the
+  `VS 2019` directory on this machine contains no `cl.exe`. Resolution agreed
+  (ADR-0006): install `Microsoft.VisualStudio.2022.BuildTools` with the VCTools
+  workload. Phase 2 is blocked until then. `llama-cpp-python` (Phase 7) has the
+  same requirement.
+
+  ```powershell
+  # run from an ADMIN PowerShell
+  winget install --id Microsoft.VisualStudio.2022.BuildTools `
+    --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+  ```
+
+  Verify with: `C:/Users/HP/.venvs/smartann/Scripts/uv pip install hnswlib`
+
+- **No measured energy or CPU temperature on the dev machine** (ADR-0007). Phase
+  3's energy MAPE acceptance check cannot be evaluated here; only the latency
+  check can. Both outcomes must be reported explicitly in
+  `results/calibration/report.md`. See README "Hardware caveat".
 
 ## Deferred design decisions
 

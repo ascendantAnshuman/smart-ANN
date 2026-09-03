@@ -109,7 +109,12 @@ readable CPU temperature and no RAPL energy counters**:
 Consequently `energy_mj_measured` is `None` on this machine and
 `temperature_c` comes from the simulator. Per Section 3 rule 1, no code path
 substitutes a modelled value for a measured one. Real thermal and energy ground
-truth comes from Phase 9 only.
+truth comes from Phase 9 only, which is therefore **required, not optional**
+(ADR-0007): it is the sole source of measured temperature and battery-current
+energy, and the only thing that can calibrate the simulator's thermal constants.
+
+Building the index additionally requires the MSVC C++ Build Tools, since
+`hnswlib` ships no Windows wheels -- see TODO.md for the one-line install.
 
 ## Quickstart
 
