@@ -20,7 +20,27 @@ from tqdm import tqdm
 
 from smartann.data.registry import Space
 
-__all__ = ["GroundTruthResult", "compute_topk", "recall_at_k"]
+__all__ = [
+    "DIST_CONVENTION",
+    "GroundTruthResult",
+    "MonotonicityReport",
+    "check_row_monotonic",
+    "compute_topk",
+    "gather_distances",
+    "recall_at_k",
+]
+
+# The units we store ground-truth distances in. These are hnswlib's own
+# conventions, not ours: its "l2" space returns SQUARED euclidean distance and
+# its "ip" space returns ``1 - inner_product`` (both pinned in
+# tests/test_hnswlib_contract.py). Storing anything else would mean converting
+# at every comparison site, and one missed conversion inverts a ranking
+# silently. Smaller is better in both.
+DIST_CONVENTION: dict[str, str] = {
+    "l2": "squared_l2",
+    "ip": "one_minus_ip",
+    "cosine": "one_minus_ip",
+}
 
 _BYTES_PER_FLOAT = 4
 
@@ -28,7 +48,7 @@ _BYTES_PER_FLOAT = 4
 @dataclass(frozen=True)
 class GroundTruthResult:
     neighbors: np.ndarray  # (n_queries, k) int32
-    scores: np.ndarray  # (n_queries, k) float32 -- similarity for ip, distance for l2
+    scores: np.ndarray  # (n_queries, k) float32 -- similarity for ip, squared distance for l2
     space: Space
     n_base: int
     resumed_from_block: int
@@ -119,10 +139,17 @@ def compute_topk(
             if larger_is_better:
                 scores = qb @ block.T
             else:
-                # ||a-b||^2 = ||a||^2 - 2ab + ||b||^2; the ||a||^2 term is
-                # constant per query and cannot change the ordering, so it is
-                # dropped to save an allocation.
-                scores = (block * block).sum(1)[None, :] - 2.0 * (qb @ block.T)
+                # ||q-b||^2 = ||q||^2 - 2qb + ||b||^2. The ||q||^2 term is
+                # constant per query and cannot change the ORDERING -- which is
+                # why it was originally dropped -- but these scores are stored
+                # and later compared against a threshold, and without it every
+                # value is off by a per-query constant. Correct for ranking is
+                # not correct for a value that leaves the function.
+                scores = (
+                    (qb * qb).sum(1)[:, None]
+                    + (block * block).sum(1)[None, :]
+                    - 2.0 * (qb @ block.T)
+                )
             best_scores[qlo:qhi], best_idx[qlo:qhi] = _merge_topk(
                 best_scores[qlo:qhi],
                 best_idx[qlo:qhi],
@@ -164,3 +191,94 @@ def recall_at_k(retrieved: np.ndarray, truth: np.ndarray, k: int) -> np.ndarray:
     for i in range(retrieved.shape[0]):
         out[i] = len(set(retrieved[i, :k].tolist()) & set(truth[i, :k].tolist())) / k
     return out
+
+
+def gather_distances(
+    base: np.ndarray,
+    queries: np.ndarray,
+    neighbors: np.ndarray,
+    space: Space,
+    query_block: int = 1024,
+) -> np.ndarray:
+    """Distance from each query to each of *its own* stored neighbours.
+
+    Not a re-run of :func:`compute_topk`. We already have the neighbour ids --
+    shipped by the dataset and remapped onto the compacted base (ADR-0014), or
+    computed once for the QA corpus -- and re-deriving them would risk a
+    different tie ordering, leaving distances silently misaligned with the ids
+    they are supposed to describe. Gathering instead guarantees
+    ``out[q, j] == dist(queries[q], base[neighbors[q, j]])`` by construction,
+    and costs ``n_queries * depth`` comparisons rather than ``n_queries * n_base``.
+
+    Returns float32 in :data:`DIST_CONVENTION` units -- smaller is better.
+    """
+    if neighbors.shape[0] != queries.shape[0]:
+        raise ValueError(
+            f"neighbours cover {neighbors.shape[0]} queries but {queries.shape[0]} were given"
+        )
+    if base.shape[1] != queries.shape[1]:
+        raise ValueError(f"dim mismatch: base {base.shape[1]} vs queries {queries.shape[1]}")
+    if space not in DIST_CONVENTION:
+        raise ValueError(f"unsupported space {space!r}")
+    lo, hi = int(neighbors.min()), int(neighbors.max())
+    if lo < 0 or hi >= base.shape[0]:
+        raise ValueError(
+            f"neighbour ids span [{lo}, {hi}], outside the base set [0, {base.shape[0] - 1}]"
+        )
+
+    n_q, depth = neighbors.shape
+    out = np.empty((n_q, depth), dtype=np.float32)
+
+    for qlo in range(0, n_q, query_block):
+        qhi = min(qlo + query_block, n_q)
+        qb = np.ascontiguousarray(queries[qlo:qhi], dtype=np.float32)
+        # (block, depth, dim) -- bounded by query_block, not by n_base
+        nb = np.asarray(base[neighbors[qlo:qhi].ravel()], dtype=np.float32).reshape(
+            qhi - qlo, depth, -1
+        )
+        if space == "l2":
+            diff = nb - qb[:, None, :]
+            out[qlo:qhi] = np.einsum("qdi,qdi->qd", diff, diff)
+        else:
+            out[qlo:qhi] = 1.0 - np.einsum("qdi,qi->qd", nb, qb)
+
+    return out
+
+
+@dataclass(frozen=True)
+class MonotonicityReport:
+    """Whether stored neighbour ids are ordered consistently with their distances."""
+
+    ok: bool
+    worst_violation: float  # most negative diff seen; 0.0 when perfectly sorted
+    worst_query: int
+    worst_depth: int
+    n_violating_rows: int
+    n_queries: int
+    tol: float
+
+
+def check_row_monotonic(dists: np.ndarray, tol: float = 1e-5) -> MonotonicityReport:
+    """Assert every ground-truth row is non-decreasing in distance.
+
+    This is the sharp test of ADR-0014's claim. The neighbour ids were shipped
+    by the dataset and then remapped onto a compacted base; the distances here
+    were computed independently from the compacted vectors. If the remapping
+    had shifted any id onto the wrong row, the ordering would break. Run over
+    every query, not a sample -- a remapping bug can touch one row in a million.
+    """
+    if dists.ndim != 2 or dists.shape[1] < 2:
+        raise ValueError(f"expected a (n_queries, depth>=2) array, got {dists.shape}")
+    diffs = np.diff(dists.astype(np.float64), axis=1)
+    flat = int(np.argmin(diffs))
+    qi, di = np.unravel_index(flat, diffs.shape)
+    worst = float(diffs[qi, di])
+    return MonotonicityReport(
+        ok=worst >= -tol,
+        worst_violation=min(worst, 0.0),
+        worst_query=int(qi),
+        worst_depth=int(di),
+        n_violating_rows=int(np.sum(np.any(diffs < -tol, axis=1))),
+        n_queries=int(dists.shape[0]),
+        tol=tol,
+    )

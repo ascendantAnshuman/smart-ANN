@@ -28,7 +28,7 @@ from smartann.types import AnnConfig, PipelineConfig, ScrConfig
 
 
 def make_ann(**kw: object) -> AnnConfig:
-    base = {"nprobe": 4, "ef_centroid": 64, "ef_list": 64, "k": 5, "rerank_candidates": 20}
+    base = {"nprobe": 4, "ef_centroid": 64, "ef_list": 64, "k": 5, "per_cluster_k": 20}
     base.update(kw)
     return AnnConfig(**base)  # type: ignore[arg-type]
 
@@ -100,7 +100,7 @@ def test_hash_changes_with_any_field() -> None:
         ("ef_centroid", 128),
         ("ef_list", 32),
         ("k", 10),
-        ("rerank_candidates", 50),
+        ("per_cluster_k", 50),
     ]:
         assert config_hash(make_ann(**{fieldname: newvalue})) != config_hash(base), fieldname
 
@@ -131,7 +131,7 @@ def test_hash_is_stable_across_processes(tmp_path: Path) -> None:
             from smartann.types import AnnConfig, PipelineConfig, ScrConfig
 
             cfg = PipelineConfig(
-                ann=AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, rerank_candidates=20),
+                ann=AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, per_cluster_k=20),
                 scr=ScrConfig(
                     sliding_window_size=3,
                     overlap_size=2,
@@ -194,7 +194,7 @@ def test_valid_configs_pass() -> None:
         ({"nprobe": 0}, "nprobe"),
         ({"ef_list": 0}, "ef_list"),
         ({"k": 0}, "k"),
-        ({"k": 10, "rerank_candidates": 5}, "rerank_candidates"),
+        ({"k": 10, "per_cluster_k": 5}, "per_cluster_k"),
         ({"nprobe": 32, "ef_centroid": 16}, "ef_centroid"),
     ],
 )
@@ -255,7 +255,7 @@ def test_load_yaml_rejects_unknown_field(tmp_path: Path) -> None:
     """
     p = tmp_path / "extra.yaml"
     p.write_text(
-        "nprobe: 4\nef_centroid: 64\nef_list: 64\nk: 5\nrerank_candidates: 20\nbogus: 1\n",
+        "nprobe: 4\nef_centroid: 64\nef_list: 64\nk: 5\nper_cluster_k: 20\nbogus: 1\n",
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="bogus"):
@@ -265,7 +265,7 @@ def test_load_yaml_rejects_unknown_field(tmp_path: Path) -> None:
 def test_load_yaml_suggests_near_miss(tmp_path: Path) -> None:
     p = tmp_path / "typo.yaml"
     p.write_text(
-        "nprobe: 4\nef_centroid: 64\nef_lst: 64\nk: 5\nrerank_candidates: 20\n",
+        "nprobe: 4\nef_centroid: 64\nef_lst: 64\nk: 5\nper_cluster_k: 20\n",
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="did you mean 'ef_list'"):
@@ -283,7 +283,7 @@ def test_load_yaml_rejects_unknown_nested_field(tmp_path: Path) -> None:
               ef_centroid: 64
               ef_list: 64
               k: 5
-              rerank_candidates: 20
+              per_cluster_k: 20
               ef_lst: 128
             scr:
               sliding_window_size: 3

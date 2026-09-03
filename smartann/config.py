@@ -258,10 +258,10 @@ def validate_ann_config(cfg: AnnConfig) -> AnnConfig:
         raise ConfigError(f"ef_list must be >= 1, got {cfg.ef_list}")
     if cfg.k < 1:
         raise ConfigError(f"k must be >= 1, got {cfg.k}")
-    if cfg.rerank_candidates < cfg.k:
+    if cfg.per_cluster_k < cfg.k:
         raise ConfigError(
-            f"rerank_candidates ({cfg.rerank_candidates}) must be >= k ({cfg.k}): "
-            "the rerank pool cannot be smaller than the result set"
+            f"per_cluster_k ({cfg.per_cluster_k}) must be >= k ({cfg.k}): "
+            "asking a cluster for fewer than k can only lose results the merge needed"
         )
     if cfg.ef_centroid < cfg.nprobe:
         raise ConfigError(

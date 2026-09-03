@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
+
+if TYPE_CHECKING:  # heavy imports stay out of CLI startup
+    import numpy as np
+
+    from smartann.config import PathsConfig
+    from smartann.data.registry import DatasetSpec
 
 from smartann import __version__
 from smartann.config import config_hash, dump_yaml, resolve_paths
@@ -276,10 +282,97 @@ def data_groundtruth(
         extra={"k": k, "space": spec.search_space, "method": "exact brute force"},
     )
     manifest.write()
+    typer.echo("computing ground-truth distances")
+    _write_gt_dists(name, spec, out_dir, base, queries, result.neighbors, paths_cfg)
     ckpt = out_dir / "groundtruth.ckpt.npz"
     if ckpt.exists():
         ckpt.unlink()
     typer.echo(f"wrote {gt_path}  shape={result.neighbors.shape}")
+
+
+def _write_gt_dists(
+    name: str,
+    spec: DatasetSpec,
+    out_dir: Path,
+    base: np.ndarray,
+    queries: np.ndarray,
+    neighbors: np.ndarray,
+    paths_cfg: PathsConfig,
+) -> None:
+    """Write ``groundtruth_dists_top100.npy`` and verify it orders the ids."""
+    import numpy as np
+
+    from smartann.data.download import sha256_file
+    from smartann.data.groundtruth import DIST_CONVENTION, check_row_monotonic, gather_distances
+    from smartann.data.manifest import DataManifest
+
+    space = spec.search_space
+    dists = gather_distances(base, queries, neighbors, space)
+
+    report = check_row_monotonic(dists)
+    typer.echo(
+        f"  monotonicity: {report.n_queries - report.n_violating_rows}/{report.n_queries} rows "
+        f"non-decreasing, worst violation {report.worst_violation:.3e} "
+        f"(query {report.worst_query}, depth {report.worst_depth}->{report.worst_depth + 1})"
+    )
+    if not report.ok:
+        raise typer.BadParameter(
+            f"{name}: ground-truth ids are not ordered by their own distances "
+            f"(worst {report.worst_violation:.3e} < -{report.tol:g}). Either the remapping "
+            "shifted an id onto the wrong row or the space is wrong -- do not ship this."
+        )
+
+    path = out_dir / "groundtruth_dists_top100.npy"
+    np.save(path, dists)
+    manifest = DataManifest(paths_cfg.data_root)
+    manifest.record(
+        path,
+        dataset=name,
+        stage="groundtruth",
+        sha256=sha256_file(path),
+        extra={
+            "space": space,
+            # Stored in hnswlib's units, so retrieved and true distances compare
+            # directly with no transform at the comparison site.
+            "dists_convention": DIST_CONVENTION[space],
+            "aligned_with": "groundtruth_top100.npy",
+            "depth": int(dists.shape[1]),
+            "method": "exact, gathered against the stored neighbour ids",
+            "monotonic_worst_violation": report.worst_violation,
+            "monotonic_violating_rows": report.n_violating_rows,
+        },
+    )
+    manifest.write()
+    typer.echo(f"wrote {path}  shape={dists.shape}  units={DIST_CONVENTION[space]}")
+
+
+@data_app.command("gt-dists")
+def data_gt_dists(
+    name: str = typer.Argument(...),
+    force: bool = typer.Option(False, "--force", help="Recompute even if it exists."),
+) -> None:
+    """Compute exact distances for the stored ground-truth neighbours.
+
+    Score-equality recall needs the true distance at depth k, which the shipped
+    HDF5 files give in their own units against the pre-compaction base. This
+    recomputes them from the vectors we actually index.
+    """
+    from smartann.data.readers import load_processed
+    from smartann.data.registry import spec_for
+
+    spec = spec_for(name)
+    paths_cfg = resolve_paths()
+    out_dir = paths_cfg.processed / name
+    path = out_dir / "groundtruth_dists_top100.npy"
+    if path.exists() and not force:
+        typer.echo(f"{path} exists; pass --force to recompute.")
+        return
+
+    base = load_processed(out_dir, "base")
+    queries = load_processed(out_dir, "queries")
+    neighbors = load_processed(out_dir, "groundtruth")
+    typer.echo(f"{name}: {neighbors.shape[0]:,} queries x depth {neighbors.shape[1]}")
+    _write_gt_dists(name, spec, out_dir, base, queries, neighbors, paths_cfg)
 
 
 # ---------------------------------------------------------------------------

@@ -58,7 +58,7 @@ def test_paths_reports_both_roots() -> None:
 def test_config_hash_is_stable_across_invocations(tmp_path: Path) -> None:
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        "nprobe: 4\nef_centroid: 64\nef_list: 64\nk: 5\nrerank_candidates: 20\n",
+        "nprobe: 4\nef_centroid: 64\nef_list: 64\nk: 5\nper_cluster_k: 20\n",
         encoding="utf-8",
     )
     first = runner.invoke(app, ["config", "hash", str(cfg)])

@@ -78,9 +78,7 @@ def test_set_ef_changes_recall_monotonically(
     the adaptive layer to adapt.
     """
     base, queries = data
-    exact = np.argsort(
-        (base * base).sum(1)[None, :] - 2.0 * (queries @ base.T), axis=1
-    )[:, :10]
+    exact = np.argsort((base * base).sum(1)[None, :] - 2.0 * (queries @ base.T), axis=1)[:, :10]
 
     recalls = []
     for ef in (8, 16, 32, 64, 128, 256):

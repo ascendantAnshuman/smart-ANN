@@ -8,9 +8,9 @@ Keep this file in sync when a stub is filled in or a new one is added.
 
 ## Phase 2 — EcoVector index
 
-- `smartann/cli.py::index_build` — EcoVector build; needs `hnswlib`, which does **not**
-  currently install on this machine (no MSVC toolchain — see README hardware caveat).
-- `smartann/cli.py::index_info` — index metadata + memory model; blocked on the same.
+- `smartann/cli.py::index_build` — EcoVector build. Unblocked (ADR-0017): `hnswlib`
+  is available via `chroma-hnswlib==0.7.5` on CPython 3.12.
+- `smartann/cli.py::index_info` — index metadata + memory model.
 
 ## Phase 3.5 — On-device trace capture (ADR-0008)
 
@@ -24,28 +24,14 @@ Keep this file in sync when a stub is filled in or a new one is added.
 
 ## Known blockers (not stubs)
 
-- **`hnswlib` cannot be installed until the MSVC C++ Build Tools are present.**
-  No binary wheels exist on PyPI and the source build requires MSVC ≥ 14.0; the
-  `VS 2019` directory on this machine contains no `cl.exe`. Resolution agreed
-  (ADR-0006): install `Microsoft.VisualStudio.2022.BuildTools` with the VCTools
-  workload. Phase 2 is blocked until then. `llama-cpp-python` (Phase 7) has the
-  same requirement.
+- **`llama-cpp-python` (Phase 7) still needs the MSVC C++ Build Tools.** The
+  Phase 2 hnswlib blocker is resolved without them (ADR-0017), but the local
+  generator is a source build with no wheel. Install from an ADMIN PowerShell:
 
   ```powershell
-  # run from an ADMIN PowerShell
   winget install --id Microsoft.VisualStudio.2022.BuildTools `
     --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
   ```
 
-  Verify with: `C:/Users/HP/.venvs/smartann/Scripts/uv pip install hnswlib`
-
-- **No measured energy or CPU temperature on the dev machine** (ADR-0007). Phase
-  3's energy MAPE acceptance check cannot be evaluated here; only the latency
-  check can. Both outcomes must be reported explicitly in
-  `results/calibration/report.md`. See README "Hardware caveat".
-
-## Deferred design decisions
-
-- `smartann/types.py` will need `SearchResult` (Phase 2) and `ThermalTier` /
-  `Profile` enums (Phases 4 and 6). These are additions to the Section 6
-  contracts and require explicit sign-off before being added.
+- **Thermal and energy ground truth exist only on the Android phone**
+  (ADR-0007, ADR-0008). This machine can measure neither.

@@ -27,7 +27,7 @@ REQUIRED_KEYS = {
 
 def _cfg() -> PipelineConfig:
     return PipelineConfig(
-        ann=AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, rerank_candidates=20),
+        ann=AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, per_cluster_k=20),
         scr=ScrConfig(
             sliding_window_size=3,
             overlap_size=2,

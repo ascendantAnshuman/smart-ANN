@@ -38,7 +38,7 @@ class AnnConfig:
     ef_centroid: int  # ef for the centroid graph search
     ef_list: int  # ef for per-cluster graph search
     k: int  # documents returned
-    rerank_candidates: int  # candidate pool before final top-k
+    per_cluster_k: int  # neighbours requested FROM EACH probed cluster before merging
 
 
 @dataclass(frozen=True)
@@ -136,29 +136,47 @@ class QueryRecord:
     query_id: str
     run_id: str
     t_wall: float
+    # provenance: which dataset, which index, which build. Without these, three
+    # datasets or three index variants write indistinguishable rows into one
+    # parquet and every cross-run aggregate silently averages them together.
+    dataset: str
+    index_variant: str  # "ecovector" | "flat_hnsw" | "ivf_disk"
+    index_config_hash: str
+    cache_state: str  # "cold" | "warm" | "mixed"
     # decisions
     config: PipelineConfig
     policy_name: str
     controller_overhead_us: float
     # retrieval outcome
     retrieved_ids: list[int]
-    recall_at_k: float | None  # None when ground truth unavailable
+    retrieved_dists: list[float]  # in the index's own convention; needed for score-equality recall
+    recall_at_k: float | None  # score-equality (tie-aware); None when ground truth unavailable
+    recall_at_k_index: float | None  # index-overlap; the gap between the two is the tie rate
     recall_proxy: float
     # timing breakdown (ms)
     t_embed: float
     t_centroid: float
     t_cluster_load: float
     t_cluster_search: float
+    t_merge: float  # merging per-cluster results into the final top-k. There is no
+    # rerank pass: hnswlib returns true distances to the candidates it finds, so
+    # the merge already yields the exact best-k among everything examined.
     t_scr: float
     t_generate: float
     t_total: float
-    # cost
-    n_distance_computations: int
+    # cost. The split is not cosmetic: flat clusters count their comparisons
+    # exactly, graph clusters can only be modelled as ef*M, and a cost model
+    # regressed on the sum would be fitted partly to its own assumption.
+    n_distance_computations: int  # == n_dist_exact + n_dist_modeled
+    n_dist_exact: int  # flat-cluster and centroid-scan comparisons, actually counted
+    n_dist_modeled: int  # graph-traversal comparisons, estimated as ef*M
+    n_flat_clusters_scanned: int
     n_cluster_loads: int
     bytes_read: int
     energy_mj_model: float
     energy_mj_measured: float | None
     peak_rss_mb: float
+    anon_rss_mb: float  # anonymous (non-file-backed) resident set: the index's true cost
     # device snapshot at query start
     device: DeviceState
     # generation (when the full RAG path is enabled)
@@ -166,3 +184,5 @@ class QueryRecord:
     answer: str | None
     em: float | None
     f1: float | None
+    # set by the exhaustive-equivalence harness only; never by a normal run
+    validation_mode: bool = False

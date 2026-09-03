@@ -277,6 +277,94 @@ def check5_mmap_does_not_double_rss() -> None:
     )
 
 
+def check8_groundtruth_distances() -> None:
+    """The Phase 1 addendum: recomputed distances, ordering, and units.
+
+    Three separate claims, reported together because they fail together:
+      (a) every ground-truth row is non-decreasing in distance -- the sharp test
+          of ADR-0014, since the ids were shipped by the dataset and remapped,
+          while these distances were computed from the compacted vectors;
+      (b) our values reproduce the PUBLISHED distances in the HDF5, which is
+          independent of anything in this repo;
+      (c) the stored units are hnswlib's, so no transform sits between a
+          retrieved distance and the threshold it is compared against.
+    """
+    import h5py
+
+    from smartann.data.groundtruth import DIST_CONVENTION, check_row_monotonic
+
+    paths = resolve_paths()
+    # ANN-Benchmarks stores euclidean as plain L2 and angular as 1 - cos.
+    # Determined empirically against the files, not assumed: our first guess
+    # (sqrt(2-2cos)) was wrong by a median of 0.48.
+    published = {
+        "sift1m": ("sift-128-euclidean.hdf5", lambda p: p**2, "published^2"),
+        "nytimes": ("nytimes-256-angular.hdf5", lambda p: p, "published (identical)"),
+    }
+
+    lines: list[str] = []
+    ok = True
+    for name in ("sift1m", "nytimes", "squad"):
+        d = paths.processed / name
+        path = d / "groundtruth_dists_top100.npy"
+        if not path.exists():
+            report("8. ground-truth distances", False, f"{path} is missing")
+            return
+        dists = np.load(path).astype(np.float64)
+        rep = check_row_monotonic(dists)
+        ok &= rep.ok
+        units = DIST_CONVENTION[spec_for(name).search_space]
+        line = (
+            f"{name:8s} {dists.shape[0]:>6,}x{dists.shape[1]:<3} {units:<13} "
+            f"monotonic {rep.n_queries - rep.n_violating_rows:,}/{rep.n_queries:,} "
+            f"worst {rep.worst_violation:+.2e}"
+        )
+
+        if name in published:
+            fname, transform, label = published[name]
+            with h5py.File(paths.raw / name / fname, "r") as f:
+                pub = np.asarray(f["distances"], dtype=np.float64)
+                keep = np.linalg.norm(np.asarray(f["test"], dtype=np.float32), axis=1) > 0
+            pub = transform(pub[keep][:, : dists.shape[1]])
+            err = np.abs(dists - pub)
+            # Combined band, not pure relative. NYTimes' 1-cos goes to ~0 for
+            # near-duplicate vectors, where a 3.6e-07 absolute error reads as a
+            # 3.6e+05 relative one -- the same trap as signed similarities in
+            # score-equality recall, and it caught this check first.
+            band = 1e-5 + 1e-4 * np.abs(pub)
+            matched = float(np.mean(err <= band))
+            ok &= matched == 1.0
+            line += f"\n           vs {label}: max abs {err.max():.2e}, {matched:.6f} inside atol+rtol|x|"
+        else:
+            line += "\n           no published reference (we computed this ground truth)"
+        lines.append(line)
+
+    report("8. ground-truth distances", ok, "\n       ".join(lines))
+
+
+def check9_tie_structure() -> None:
+    """How much recall the two metrics can disagree about, per dataset.
+
+    Not pass/fail -- a measurement. If ties at the k-boundary were rare, the
+    score-equality metric would be an expensive way to compute the index-overlap
+    one, and Phase 2 would be carrying complexity for nothing.
+    """
+    paths = resolve_paths()
+    k = 10
+    lines = []
+    for name in ("sift1m", "nytimes", "squad"):
+        dists = np.load(paths.processed / name / "groundtruth_dists_top100.npy").astype(np.float64)
+        at_k = dists[:, k - 1]
+        band = 1e-6 + 1e-6 * np.abs(at_k)
+        # neighbours beyond depth k that are indistinguishable from the k-th
+        extra = np.sum(np.abs(dists[:, k:] - at_k[:, None]) <= band[:, None], axis=1)
+        lines.append(
+            f"{name:8s} k={k}: {float(np.mean(extra > 0)) * 100:5.2f}% of queries have a tie "
+            f"at the boundary, mean {extra.mean():.3f} extra, max {int(extra.max())}"
+        )
+    report("9. tie structure at the k-boundary (measurement)", True, "\n       ".join(lines))
+
+
 def check7_manifest_completeness() -> None:
     """Every artifact under the data root must have a MANIFEST.json entry."""
     paths = resolve_paths()
@@ -323,6 +411,8 @@ def main() -> int:
     check4_qa_round_trip()
     check5_mmap_does_not_double_rss()
     check7_manifest_completeness()
+    check8_groundtruth_distances()
+    check9_tie_structure()
     summary()
     return 0 if all(p for _, p, _ in RESULTS) else 1
 

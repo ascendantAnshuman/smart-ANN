@@ -35,7 +35,7 @@ YAML genuinely do need validation.
 third-party imports (enforced by a test). `smartann/config.py` validates *those
 same classes* through `pydantic.TypeAdapter`, so field names and types have one
 definition. Value-range rules that a dataclass cannot express (`nprobe >= 1`,
-`rerank_candidates >= k`, `overlap_size < sliding_window_size`) live in
+`per_cluster_k >= k`, `overlap_size < sliding_window_size`) live in
 `config.py` as explicit `validate_*` functions.
 
 **Alternatives.**
@@ -467,3 +467,98 @@ wheels -- rejected by Section 4 for the primary index. WSL2 -- available as
 rung 4 but it needs a password *and* costs every telemetry signal (no thermal
 zones, no RAPL, no cpufreq), so it is strictly worse when a no-elevation path
 exists on Windows.
+
+---
+
+## ADR-0018 — Ground-truth distances are *gathered*, stored in hnswlib's units
+
+**Status.** Accepted (Phase 1 addendum, before Phase 2).
+
+**Context.** Score-equality recall compares a retrieved distance against the
+ground-truth distance at depth k. That needs stored distances, and Phase 1
+stored only neighbour *ids*. Three problems had to be settled at once: which
+values, in which units, aligned to what.
+
+**Decision.**
+
+1. **Gather, do not recompute.** `gather_distances(base, queries, neighbors,
+   space)` computes the distance from each query to *its own stored neighbours*.
+   Re-running `compute_topk` would produce its own neighbour ordering, and any
+   tie resolved differently would leave the distances silently misaligned with
+   the ids they describe. Gathering makes
+   `out[q, j] == dist(queries[q], base[neighbors[q, j]])` true by construction,
+   and costs `n_queries * depth` comparisons instead of `n_queries * n_base`
+   (1.6 s for SIFT1M, versus hours).
+
+2. **Store in hnswlib's own convention** — squared L2 for `l2`, `1 - ip` for
+   `ip`/`cosine`, recorded per artifact as `dists_convention` in `MANIFEST.json`.
+   The alternative is a conversion at every comparison site, and one missed
+   conversion inverts a ranking with no symptom. Verified directly against the
+   library: `test_gather_distances_agrees_with_hnswlib_itself` builds an index,
+   queries it, and asserts our numbers equal the ones it returns.
+
+3. **Assert row monotonicity over every query, not a sample.** The ids were
+   shipped by the dataset and remapped onto a compacted base (ADR-0014); these
+   distances were computed independently from the compacted vectors. If the
+   remap had put an id on the wrong row, the ordering would break. Worst
+   violations measured: SIFT `+0.00e+00`, NYTimes `-5.96e-08`, SQuAD
+   `-4.17e-07`, all float32 noise against a `1e-5` tolerance.
+
+**A bug this found.** `compute_topk` computed L2 as `||b||^2 - 2qb`, dropping
+`||q||^2` because it is constant per query and cannot change the ordering. True
+for ranking, wrong for a value that leaves the function: every stored distance
+was off by a per-query constant, and score-equality recall would have compared
+against a meaningless threshold. Every ordering test the module had passed. The
+regression test is now a *value* comparison against
+`scipy.spatial.distance.cdist(..., "sqeuclidean")`.
+
+**Independent confirmation.** Our recomputed distances reproduce the ones
+published in the ANN-Benchmarks HDF5 files: SIFT to `1.14e-02` absolute on
+values of order `10^4` (float32 epsilon, 1,000,000/1,000,000 inside the band),
+NYTimes to `3.58e-07`. This is evidence from outside the repository that the
+compaction, remapping and normalisation pipeline is correct end to end. Their
+angular convention was determined empirically, not assumed — it is exactly
+`1 - cos`, identical to ours; the first guess of `sqrt(2 - 2cos)` was wrong by a
+median of 0.48 and was discarded rather than fitted around.
+
+**A tolerance mistake worth recording.** The first version of the cross-check
+used pure relative error and failed NYTimes at `3.58e+05`, because `1 - cos`
+approaches zero for near-duplicate vectors. Same trap as signed similarities in
+score-equality recall, and the same fix: `band = atol + rtol * |x|`.
+
+---
+
+## ADR-0019 — There is no rerank pass; `per_cluster_k` replaces `rerank_candidates`
+
+**Status.** Accepted (before any Phase 2 index code).
+
+**Context.** The Section 6 `AnnConfig` carried `rerank_candidates`: a candidate
+pool gathered across probed clusters, then re-scored exactly against the raw
+vectors to produce the final top-k.
+
+**Decision.** Drop the exact-rerank stage. `hnswlib.knn_query` is approximate in
+*which* candidates it returns but **exact in the distance to each one**
+(`test_l2_space_returns_squared_distance`, `test_ip_space_returns_one_minus_ip`).
+Merging per-cluster results by those distances therefore already yields the
+exact best-k among everything examined. A rerank pass would recompute numbers we
+already hold.
+
+**Consequences.**
+- `AnnConfig.rerank_candidates` → **`per_cluster_k`**: the retrieval depth
+  requested *from each probed cluster* before merging. This is a real knob —
+  asking a cluster for only `k` loses results a deeper pull would have surfaced —
+  where the old one had no effect at all. `per_cluster_k >= k` is validated.
+- `QueryRecord.t_rerank` → **`t_merge`**.
+- Had this not been caught, `rerank_candidates` would have entered the Phase 8
+  Pareto grid as a dimension with no measurable effect, wasting profiling compute
+  and adding a dead axis to the controller's action space.
+- Flat clusters (below `min_graph_size`) must return distances in the *same*
+  convention as graph clusters, or a merged list sorts wrong across cluster
+  types. Asserted by test in Phase 2.
+- `per_cluster_k` joins `ef_list` in the Phase 6 profile table, which matters if
+  the probe-cost check (Phase 2, check 8) comes back high.
+
+**Memory consequence.** Reranking against a global `base.npy` would have put the
+full base array back on the search path. Instead the merge uses the distances
+hnswlib already returned, so search touches the centroid graph and one cluster
+graph at a time — which is what MobileRAG's memory expression actually describes.

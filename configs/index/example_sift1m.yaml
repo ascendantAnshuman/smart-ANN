@@ -4,4 +4,4 @@ nprobe: 4
 ef_centroid: 64
 ef_list: 64
 k: 5
-rerank_candidates: 20
+per_cluster_k: 20

@@ -34,7 +34,7 @@ FROZEN = [
 ]
 
 EXPECTED_FIELDS = {
-    AnnConfig: ["nprobe", "ef_centroid", "ef_list", "k", "rerank_candidates"],
+    AnnConfig: ["nprobe", "ef_centroid", "ef_list", "k", "per_cluster_k"],
     ScrConfig: [
         "sliding_window_size",
         "overlap_size",
@@ -98,15 +98,15 @@ def test_query_record_is_mutable() -> None:
 
 
 def test_frozen_config_rejects_mutation() -> None:
-    cfg = AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, rerank_candidates=20)
+    cfg = AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, per_cluster_k=20)
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.nprobe = 8  # type: ignore[misc]
 
 
 def test_frozen_configs_are_hashable_and_usable_as_dict_keys() -> None:
     """Profiling tables key on configs, so they must be usable as dict keys."""
-    a = AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, rerank_candidates=20)
-    b = AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, rerank_candidates=20)
+    a = AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, per_cluster_k=20)
+    b = AnnConfig(nprobe=4, ef_centroid=64, ef_list=64, k=5, per_cluster_k=20)
     assert a == b
     assert {a: "x"}[b] == "x"
 
@@ -140,3 +140,34 @@ def test_types_module_has_no_third_party_imports() -> None:
     forbidden = ("import numpy", "import pydantic", "from pydantic", "import pandas", "import yaml")
     for token in forbidden:
         assert token not in source, f"types.py must not import third-party code: {token}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 additions
+# ---------------------------------------------------------------------------
+def test_query_record_carries_its_own_provenance() -> None:
+    """Three datasets or three index variants must not write indistinguishable rows."""
+    names = {f.name for f in dataclasses.fields(QueryRecord)}
+    assert {"dataset", "index_variant", "index_config_hash", "cache_state"} <= names
+
+
+def test_query_record_splits_exact_from_modelled_distance_counts() -> None:
+    """A cost model regressed on the sum would be fitted partly to its own assumption."""
+    names = [f.name for f in dataclasses.fields(QueryRecord)]
+    assert "n_dist_exact" in names and "n_dist_modeled" in names
+    assert "n_distance_computations_is_modeled" not in names, (
+        "the boolean was replaced by the split"
+    )
+
+
+def test_query_record_has_no_rerank_stage() -> None:
+    """hnswlib returns true distances to what it finds, so the merge IS the rerank."""
+    names = [f.name for f in dataclasses.fields(QueryRecord)]
+    assert "t_merge" in names
+    assert "t_rerank" not in names
+
+
+def test_validation_mode_defaults_off() -> None:
+    """Exhaustive equivalence must be unreachable from a normal run."""
+    field = next(f for f in dataclasses.fields(QueryRecord) if f.name == "validation_mode")
+    assert field.default is False
