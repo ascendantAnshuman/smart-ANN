@@ -1301,3 +1301,74 @@ signal not to quote the median.
 every variant within each config. The regime test does the same. Any future
 comparison that cannot interleave -- because the variants are separate processes,
 say -- must say so and must carry a control.
+
+---
+
+## ADR-0028 (regime test) — the graphs lose inside their own condition too
+
+**Status.** Closes ADR-0028. The conclusion hardens; it does not change.
+
+**The question a reviewer would ask.** ADR-0028 found the graphs do not pay in
+the default configuration, and explained it with MobileRAG's own condition
+`ef_L * M' < N/Nc`, which the default violates. The obvious next question is
+whether they pay where the condition *holds*. "Out of scope" is a weak answer
+when the test is one build pair.
+
+**Setup.** SIFT only, `nc=250` so `N/Nc = 4000`, against `ef_L * M' = 1024`
+(M=16) and `2048` (M=32) -- both comfortably inside. Interleaved timing per
+ADR-0030. A probe, not a proposed default: ADR-0027's `nc=2000` pin stands.
+
+```
+ nprobe          eco M=16                  eco M=32                  ivf_disk
+        recall   dist      ms       recall   dist      ms      recall   dist      ms
+      2 0.6487   2,298   24.67      0.6493   4,343   24.66     0.6507   8,784    9.41
+      4 0.8173   4,346  132.94      0.8183   8,436  143.70     0.8197  17,298   58.07
+      8 0.9217   8,442  101.23      0.9230  16,625  102.74     0.9243  34,071   34.77
+     16 0.9780  16,634  190.87      0.9790  32,998  200.78     0.9807  67,287   63.68
+```
+
+**The condition works exactly as the paper says it should.** Inside the regime
+the graphs really do cut distance computations -- 3.8x at M=16, 2.0x at M=32,
+consistently across every `nprobe`. MobileRAG's cost model is correct about the
+quantity it models.
+
+**And the graphs still lose.** Wall-clock is **2.3x to 3.0x worse** with graphs
+at every operating point, and recall is very slightly worse too (ivf_disk is
+marginally highest in all four rows -- the graph's approximation costs a little
+accuracy that the full scan does not).
+
+**Why: the paper's cost model has no reconstruction term.** Its search cost is
+distance computations plus disk I/O
+(`n_seek * (T_seek + T_cmd + n_byte * T_transfer)`). Nothing in it charges for
+deserialising a graph structure, which measurement B put at 95-99% of load time
+(ADR-0026 amendment). So EcoVector wins the quantity the model counts and loses
+the quantity that matters, because the dominant real cost is not in the model at
+all. That is a gap in the model rather than a violation of it, and it is the
+same omission measurement B found from the other direction.
+
+**Verdict.** The graphs stay removed. The finding is now stronger than "the
+default configuration is outside the regime": *even inside the regime where
+EcoVector's own cost model predicts its distinguishing component should pay, it
+does not, because the model omits the cost that dominates.*
+
+**Caveat, unchanged and still narrow.** The reconstruction cost is hnswlib's.
+A serialisation format that could be mapped rather than parsed might reverse the
+wall-clock result while leaving the distance-computation result intact. What is
+implementation-independent: the condition itself, the 3.8x reduction in distance
+computations, and the recall equivalence.
+
+**And a note on which side is the faithful one.** Our `ivf_disk` memory-maps its
+flat clusters, so warm "loading" is a page-table operation. The paper's model
+charges for I/O and distance computations but never for a memcpy or a parse, so
+an mmap'd scan path is *closer* to what the paper models than a read-and-copy
+path would be. The divergence from the paper's model is on the **EcoVector**
+side -- hnswlib's `load_index` introduces a per-query cost the model does not
+have -- not on the baseline side. The precise description of what won is
+"IVF-HNSW with an mmap'd scan path".
+
+**A measurement-quality note.** Absolute timings in the table are not monotone
+in `nprobe` (the `nprobe=4` row is slower than `nprobe=8`), which is the same
+machine drift ADR-0030 documents. Interleaving equalises drift *between*
+variants within a row, which is what the comparison needs, but not *across*
+rows. The within-row ratios are the trustworthy quantity and they are stable at
+2.3-3.0x; the absolute column should not be quoted.
