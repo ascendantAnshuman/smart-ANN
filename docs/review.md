@@ -85,6 +85,10 @@ cores), 15.6 GB RAM, warm page cache.
 
 ## 3. Phase 2 results — 14 PASS, 1 FAIL
 
+*(All figures below come from a single canonical acceptance run against the
+current code, after the check-4, footprint and per-phase-target fixes. Earlier
+drafts quoted a run that predated them.)*
+
 The single failure is NYTimes check 4, and it is a dataset property rather than
 an index defect (§4).
 
@@ -99,8 +103,8 @@ built correctly, and the cheapest such evidence available:
 
 | dataset | MobileRAG Fig. 6 | measured here | ratio |
 |---|---|---|---|
-| sift1m | 9.67 MB | **10.41 MB** | **1.08×** |
-| nytimes | 3.53 MB | **40.12 MB** | **11.36×** |
+| sift1m | 9.67 MB | **10.42 MB** | **1.08×** |
+| nytimes | 3.53 MB | **39.85 MB** | **11.29×** |
 
 SIFT agrees with the paper almost exactly. **NYTimes does not, and that is an
 open question rather than a result.** It is 11.4× the paper's figure and 8.7×
@@ -109,7 +113,7 @@ per-cluster brute-force scan materialises the memory-mapped cluster during the
 matmul — NYTimes clusters are 256-dimensional, so a probed set of 16 is roughly
 9 MB of vectors against SIFT's 4 MB — but that is a hypothesis and has not been
 measured. It does not affect the index's correctness or the controller results,
-and check 5 still passes its 20% bound (40.12 MB against 56.6 MB), which is
+and check 5 still passes its 20% bound (39.85 MB against 56.6 MB), which is
 precisely the case where a loose threshold tells a reader nothing.
 
 Both figures were measured in a **fresh subprocess per dataset**. Measured inside
@@ -346,6 +350,48 @@ explicitly for any future policy — including a bandit, whose reward is a delay
 observation in exactly the same sense. The failure is not a bad constant; it is
 a violated stability condition, and it is checkable before a line of policy code
 is written.
+
+## 6b. Phase 3 — the cost model
+
+**Latency**, fitted per stage on 21,388 quiet queries and validated on 44,067
+held-out contended ones:
+
+| | MAPE | verdict |
+|---|---|---|
+| quiet (fitted) | **14.75%** | PASS (< 15%) |
+| contended (held out) | **35.87%** | FAIL (< 15%) |
+
+Reported as two numbers, never one. Averaging them would read as roughly 25% and
+hide that the model is excellent in one regime and unusable in the other.
+
+**The failure is the result, and its cause is measured.** A work-only model
+scored 36.44%, so `dev_cpu_util` was added to every CPU-competing stage — named
+from the mechanism before the refit and validated on held-out data. It moved the
+number by 0.6 points, because the feature is **censored**: 12,469 contended rows
+sit at exactly `cpu_util = 1.000` while `t_cluster_load` spans 0.67–27.59 ms
+across them. A 41× spread in the thing it must predict, while the feature does
+not move. A second mechanism compounds it — the contended median `cpu_util` is
+0.446, *lower* than a saturated machine should read, because the 10 Hz telemetry
+thread is itself starved under contention.
+
+**Consequence for Phase 6:** the model is sound for choosing effort on a quiet
+machine and unsound for anticipating a disturbance. That is a direct argument for
+keeping the controller **reactive** rather than model-based — which is what the
+AIMD governor already is. The fix is a non-saturating load metric, not another
+coefficient on a censored feature (ADR-0033).
+
+Two quantities are reported rather than silently fitted: `ef_centroid` is
+**unidentifiable** (constant at 128 everywhere; the first fit returned R² =
+0.0000), and `n_cluster_loads` / `bytes_read` are **weakly identified**
+(r = 0.966), so their individual coefficients must not be quoted alone.
+
+**Energy is specified, implemented and unit-tested — deliberately not fitted.**
+`assert_energy_measurable()` refuses on a platform whose capability table says
+energy is unavailable, and the fit script reports BLOCKED rather than a number.
+**Phase 3 closes with no energy MAPE at all.** A criterion that cannot be
+evaluated here is not marked PASS; Phase 3.5 fits and validates it on the phone.
+`t_cluster_load` is billed to the CPU current rather than the disk current, which
+is the measured departure from the paper (ADR-0026 amendment, ADR-0031).
 
 ## 7. What is not built, and what gates it
 
