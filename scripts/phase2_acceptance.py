@@ -29,7 +29,7 @@ from smartann.config import config_hash, load_yaml, resolve_paths
 from smartann.data.readers import load_ground_truth, load_processed
 from smartann.data.registry import spec_for
 from smartann.index.baselines import FlatHnswIndex, compare_note
-from smartann.index.ecovector import EcoVectorIndex, _anon_mb
+from smartann.index.ecovector import EcoVectorIndex
 from smartann.index.storage import IndexBuildConfig, IndexMeta, IndexPaths, memory_model_mb
 from smartann.types import AnnConfig
 
@@ -46,6 +46,31 @@ MOBILERAG_FIG6_MB = {"sift1m": 9.67, "nytimes": 3.53}
 
 # Check 8's verdict table, as ruled.
 PROBE_HEALTHY, PROBE_WORKABLE = 0.15, 0.35
+
+
+def assert_machine_quiet(max_util: float = 0.25, samples: int = 4) -> None:
+    """Refuse to take a timing measurement on a busy machine.
+
+    Twice now a timing run has been silently corrupted by something else on this
+    box -- once by a concurrent experiment, once by this project's own O(n^2)
+    figure generation, which perturbed the latencies it was plotting. Both were
+    caught by a number looking wrong, which is luck rather than method. A rule
+    that is written down but not enforced gets broken; this enforces it.
+    """
+    readings = [psutil.cpu_percent(interval=0.25) / 100.0 for _ in range(samples)]
+    busy = float(np.median(readings))
+    if busy > max_util:
+        raise RuntimeError(
+            f"machine is {busy * 100:.0f}% busy (median of {samples} samples, threshold "
+            f"{max_util * 100:.0f}%). Timing measurements taken now would be corrupted. "
+            f"Wait for background work to finish, or pass --allow-busy if the load is "
+            f"expected and the numbers are not being used as timings."
+        )
+    print(
+        f"machine check: {busy * 100:.0f}% busy, below the {max_util * 100:.0f}% "
+        f"threshold -- timings are trustworthy",
+        flush=True,
+    )
 
 
 def report(name: str, passed: bool, detail: str) -> None:
@@ -448,43 +473,58 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
 
 
 def check5_resident_footprint(dataset: str) -> None:
-    """Anon RSS bound, and the same number against MobileRAG Figure 6."""
-    ip = index_root(dataset, "ecovector")
-    if ip is None:
-        report(f"5. resident footprint ({dataset})", False, "no ecovector index built")
+    """Anon RSS bound, and the same number against MobileRAG Figure 6.
+
+    Measured in a FRESH SUBPROCESS per dataset. A process-wide RSS delta cannot
+    isolate one index inside a long-lived process: allocator residue from earlier
+    checks lands in the same counter, and measuring NYTimes after SIFT in one
+    process gave 38.24 MB against 5.18 MB for the same index under a different
+    ordering. A 7x swing on a number this report quotes against the paper is not
+    a measurement, so it is now taken where there is nothing else in the process.
+    """
+    import subprocess
+
+    script = Path(__file__).resolve().parent / "measure_footprint.py"
+    proc = subprocess.run(
+        [sys.executable, str(script), dataset],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        report(
+            f"5. resident footprint ({dataset})",
+            False,
+            f"measurement subprocess failed: {proc.stderr.strip()[:300]}",
+        )
         return
-    base_bytes = (resolve_paths().processed / dataset / "base.npy").stat().st_size
-    proc = psutil.Process(os.getpid())
-
-    gc.collect()
-    before = _anon_mb(proc.memory_info())
-    idx = EcoVectorIndex.open(ip.root)
-    _, queries, _, _ = load_all(dataset)
-    cfg = AnnConfig(nprobe=16, ef_centroid=64, ef_list=128, k=10, per_cluster_k=32)
-    peak = before
-    for qi in range(min(200, queries.shape[0])):
-        r = idx.search(queries[qi], cfg)
-        peak = max(peak, r.anon_rss_mb)
-    resident = peak - before
-
-    budget = 0.20 * base_bytes / 2**20
+    m = json.loads(proc.stdout.strip().splitlines()[-1])
+    resident, base_mb = m["resident_mb"], m["base_mb"]
+    budget = 0.20 * base_mb
     paper = MOBILERAG_FIG6_MB.get(dataset)
+
     lines = [
-        f"base array {base_bytes / 2**20:.0f} MB; 20% budget {budget:.1f} MB",
+        f"base array {base_mb:.0f} MB; 20% budget {budget:.1f} MB",
         f"measured anonymous RSS during search: {resident:.2f} MB "
-        f"({resident / (base_bytes / 2**20) * 100:.2f}% of the base footprint)",
+        f"({resident / base_mb * 100:.2f}% of the base footprint), fresh process, "
+        f"{m['n_queries']} queries",
     ]
     if paper is not None:
         lines.append(
             f"MobileRAG Figure 6 reports {paper:.2f} MB for EcoVector on this dataset; "
             f"ours is {resident:.2f} MB ({resident / paper:.2f}x)"
         )
+    lines.append(
+        "NOTE: on Windows psutil's private counter is commit charge, which is an "
+        "OVER-estimate of resident memory. The bound stays honest; the paper "
+        "comparison should be read as an upper bound on our footprint."
+    )
     MEASURED.setdefault("check5", {})[dataset] = resident
     MEASURED.setdefault("check5_detail", {})[dataset] = {
         "measured_mb": resident,
         "budget_mb": budget,
         "mobilerag_fig6_mb": paper,
-        "base_mb": base_bytes / 2**20,
+        "base_mb": base_mb,
     }
     report(f"5. resident footprint ({dataset})", resident <= budget, NL.join(lines))
 
@@ -694,7 +734,15 @@ def main() -> int:
     ap.add_argument("--datasets", nargs="*", default=["sift1m", "nytimes"])
     ap.add_argument("--skip", nargs="*", default=[])
     ap.add_argument("--emit-json", default="results/phase2_summary.json")
+    ap.add_argument(
+        "--allow-busy",
+        action="store_true",
+        help="skip the machine-quiet guard (timings will not be trustworthy)",
+    )
     args = ap.parse_args()
+
+    if not args.allow_busy:
+        assert_machine_quiet()
 
     checks = {
         "1a": lambda: check1a_exhaustive_equivalence(),

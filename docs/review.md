@@ -90,8 +90,24 @@ built correctly, and the cheapest such evidence available:
 
 | dataset | MobileRAG Fig. 6 | measured here | ratio |
 |---|---|---|---|
-| sift1m | 9.67 MB | **13.03 MB** | 1.35× |
-| nytimes | 3.53 MB | **5.18 MB** | 1.47× |
+| sift1m | 9.67 MB | **10.41 MB** | **1.08×** |
+| nytimes | 3.53 MB | **40.12 MB** | **11.36×** |
+
+SIFT agrees with the paper almost exactly. **NYTimes does not, and that is an
+open question rather than a result.** It is 11.4× the paper's figure and 8.7×
+our own Section 3.4 model (4.62 MB predicted). The likely cause is that the
+per-cluster brute-force scan materialises the memory-mapped cluster during the
+matmul — NYTimes clusters are 256-dimensional, so a probed set of 16 is roughly
+9 MB of vectors against SIFT's 4 MB — but that is a hypothesis and has not been
+measured. It does not affect the index's correctness or the controller results,
+and check 5 still passes its 20% bound (40.12 MB against 56.6 MB), which is
+precisely the case where a loose threshold tells a reader nothing.
+
+Both figures were measured in a **fresh subprocess per dataset**. Measured inside
+a long-lived process the NYTimes number came out as 5.18 MB in one ordering and
+38.24 MB in another — a 7× swing driven by allocator residue from earlier checks.
+On Windows psutil's private counter is commit charge, so these are upper bounds
+on resident memory.
 
 **Effort moves recall.** The premise the controller depends on, measured on the
 real index: recall@10 spans **0.3047 → 0.9537** as `nprobe` goes 1 → 32, at
@@ -170,11 +186,21 @@ failure stays visible.
 
 ---
 
-## 6. The adaptive mechanism
+## 6. The adaptive mechanism: built and measured, first control law wrong
 
-**The disturbance was verified before anything was built on it.** "We applied
-contention" is a claim; this is its evidence. Requirement: contended p95 at least
-2x quiet p95.
+Three sentences, because the honest version is neither a success nor a setback:
+
+1. **The mechanism is built and measured.** Per-query effort selection, full
+   instrumentation, sub-1% controller overhead, every query recorded.
+2. **The first control law is wrong, and the reason is structural** — it acts
+   about fifty times faster than its own feedback arrives — which is a known
+   failure mode with a known family of fixes.
+3. **The experiment that found it is the experiment that was built to find it.**
+
+### The disturbance was verified before anything was built on it
+
+"We applied contention" is a claim; this is its evidence. Requirement: contended
+p95 at least 2x quiet p95.
 
 | burners | total mem | p50 (ms) | p95 (ms) | p95 ratio |
 |---|---|---|---|---|
@@ -184,32 +210,94 @@ contention" is a claim; this is its evidence. Requirement: contended p95 at leas
 | 24 | 3.0 GB | 179.55 | 254.94 | **9.80x** |
 
 The burners **stream through a large buffer** rather than spinning on
-floating-point adds. That distinction decided the experiment: the query path is a
-brute-force scan over memory-mapped flat arrays and is memory-bandwidth bound, so
-an ALU spin loop barely touches it.
+floating-point adds; the query path is a scan over memory-mapped flat arrays and
+is memory-bandwidth bound, so an ALU spin loop barely touches it. **12 burners
+were used, not 24**: 12 clears the bar, while 24 consumes the host almost
+entirely and would leave the machine still settling when the burners stop,
+making the recovery phase unrepresentative.
 
-**12 burners were used, not 24.** 12 clears the bar at 5.80x; 24 consumes the
-host almost entirely, which would make the *recovery* phase unrepresentative --
-the machine would still be settling when the burners stop, and the third phase
-exists to show effort being restored against a quiet baseline.
+### Results — two independent disturbances, same conclusion
 
+| | contention | target-step (deterministic) |
+|---|---|---|
+| static, disturbed | 99.9% over target, recall 0.8790 | 28.2% over target, recall 0.8805 |
+| adaptive, disturbed | **9.1%** over target, recall 0.3072 | **6.3%** over target, recall 0.4079 |
+| **adaptive, QUIET** | **5.9%** vs static's 1.3% | **6.1%** vs static's 0.7% |
+| adaptive median `nprobe` | **1 in every phase** | **1 in every phase** |
 
-*(Populated from the contention experiment; see `results/figures/fig1_headline.png`.)*
+> Under contention the static policy exceeded its latency target on **99.9%** of
+> queries and the adaptive policy on **9.1%**, at a cost of **0.572 recall@10**
+> (0.8790 → 0.3072).
+>
+> **But in the quiet phase, with no disturbance at all, the adaptive policy
+> missed the target on 5.9% of queries against static's 1.3%, while holding
+> median `nprobe` at 1 against 16 and giving up 0.430 recall.**
 
-The AIMD governor observes p95 latency against a target and moves `nprobe`. It
-does not know *why* latency rose — CPU contention, thermal throttling and a hard
-query are the same signal to it. That is why demonstrating it against contention
-demonstrates the mechanism that will later face thermal throttling.
+The second sentence is the finding. With nothing wrong, the controller is worse
+on **both** axes at once. That cannot be explained by the workload, so the fault
+is in the law and not the mechanism.
 
-**The action space is one-dimensional, by measurement.** `ef_centroid` is free
-(the centroid graph matches brute force exactly at every `nprobe`, gap 0.0000)
-and `ef_list` is inert once the in-cluster search is exhaustive. `nprobe` is the
-knob that moves the trade-off. This is a smaller controller than the original
-design assumed, and it is stated rather than hidden: **C1 should be read as
-*runtime-adaptive retrieval effort*, not as several independently useful ANN
-parameters.** C3, joint ANN+SCR control, remains genuinely two-dimensional.
+The `target-step` run is the cleaner evidence: no external pressure exists at
+all, and the controller still sits at `nprobe=1` in every phase.
 
----
+### Diagnosis: the control period is shorter than the observation delay
+
+The policy acts **once per query**. The signal it acts on — a 50-sample windowed
+p95 — does not reflect a change in effort for roughly **50 queries**. The
+controller is therefore acting on the consequences of decisions it has already
+superseded, up to fifty times over. That is a stability condition, not a tuning
+preference, and it is violated by about 50×.
+
+Under that condition multiplicative decrease ratchets *by construction*: seven
+consecutive cuts take effort from 1.0 to below 0.01, and seven queries pass long
+before fifty do.
+
+**TCP AIMD adjusts `cwnd` once per RTT, not once per ACK, precisely because the
+RTT is the feedback delay.** This implemented AIMD's arithmetic without its
+clock.
+
+The figure shows it rather than asserting it: `nprobe` sawtooths 1 → 33 → 1 at
+roughly 0.4 s period through the entire quiet phase, then pins at the floor
+under contention — a limit cycle, not an adaptation.
+
+**A second-order problem, worth one line.** The window is fixed in *samples*, so
+its delay in *time* is a function of the controller's own output:
+
+| nprobe | ms/query | 50-sample window delay |
+|---|---|---|
+| 64 | 81.40 | **4.07 s** |
+| 16 | 18.63 | 0.93 s |
+| 4 | 5.60 | 0.28 s |
+| 1 | ~1.10 | **0.055 s** |
+
+A 74× swing across the action space. A controller whose feedback delay depends
+on its own output is a harder object than one with a fixed delay, and this argues
+for a time-based window independently of the ratchet.
+
+**Controller overhead** (percentiles of the per-query ratio):
+
+| policy | p50 | p95 |
+|---|---|---|
+| static | 0.002% | 0.004% |
+| adaptive | **0.603%** | **0.861%** |
+
+Under 1% even at p95, so the control layer is cheap even when its decisions are
+poor. Hard rule 5 satisfied.
+
+### The action space is one-dimensional, by measurement
+
+`ef_centroid` is free — the centroid graph matches brute force exactly at every
+`nprobe`, gap 0.0000 — and `ef_list` is inert once the in-cluster search is
+exhaustive. `nprobe` is the knob that moves the trade-off. **C1 should therefore
+be read as *runtime-adaptive retrieval effort*, not as several independently
+useful ANN parameters.** C3, joint ANN+SCR control, remains genuinely
+two-dimensional.
+
+### Phase 6 direction
+
+Act once per settling interval, or use an estimator whose response time is
+shorter than the action interval. Both are principled and pre-registrable from
+the diagnosis rather than found by searching over constants.
 
 ## 7. What is not built, and what gates it
 
