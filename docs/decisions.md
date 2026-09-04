@@ -1440,3 +1440,50 @@ the four rows are 2.62, 2.29, 2.91, 3.00: stable while the absolutes are
 visibly corrupted at one point. That is exactly what within-config interleaving
 is for (ADR-0030). The ratios are the result; the absolute column is
 drift-affected and is not quoted.
+
+---
+
+## ADR-0032 — A control loop must act no faster than its feedback delay
+
+**Status.** Accepted. Standing rule for every policy in this project, present
+and future.
+
+**The rule.** *Control actions must be paced no faster than the feedback delay
+of the signal they are read from. Verify this explicitly for any controller
+before tuning anything.*
+
+**What it cost to learn.** The first AIMD policy decided once per query while
+reading a 50-sample windowed p95. An action was therefore invisible to its own
+signal for roughly 50 queries, so the controller acted on up to fifty superseded
+decisions. Multiplicative decrease under a violated stability condition ratchets
+to the floor by construction: seven consecutive cuts take effort from 1.0 to
+below 0.01, and seven queries pass long before fifty do.
+
+The result was a controller that collapsed to `nprobe=1` in **every phase of two
+independent experiments**, including a target-step run with no external
+disturbance at all — giving up half its recall while missing its latency target
+*more often than the tuned static baseline it was supposed to improve on*.
+
+**TCP paces `cwnd` once per RTT, not once per ACK, precisely because the RTT is
+the feedback delay.** The first implementation had AIMD's arithmetic without its
+clock.
+
+**Confirmed by a pre-declared test.** `control_period_s = 4.05` (50 samples ×
+the measured quiet latency at `nprobe=64`), declared and committed before the
+code existed, one run, one setting. Quiet-phase effort changes fell from roughly
+150 to **4**, and the controller settled at `nprobe=20` with recall 0.9115
+against the static baseline's 0.8806.
+
+**Why this is a design rule and not a tuning preference.** It is checkable from
+the estimator's definition before any policy code is written, it applies to
+every controller regardless of its control law, and it makes the fix
+pre-registrable rather than found by search. A bandit is not exempt: its reward
+is a delayed observation in exactly the same sense, and a bandit updating faster
+than its reward window will exhibit the same pathology with a different shape.
+
+**A second-order consequence, recorded because it is easy to miss.** A window
+fixed in *samples* has a delay in *time* that varies with the controller's own
+output — 4.07 s at `nprobe=64` against 0.055 s at `nprobe=1`, a 74× swing across
+the action space. A controller whose feedback delay is a function of its own
+action is a harder object than one with a fixed delay, and this argues for a
+time-based window independently of the ratchet.

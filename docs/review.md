@@ -10,50 +10,59 @@ simulator, a placeholder, or a model presented as a measurement.
 
 ## 1. What the process caught
 
-Eight defects, each caught before it produced a reported number.
+Sixteen defects, each caught before it produced a reported number.
 
 **Ranked by danger, which is not the same as severity** — by how likely each was
 to survive undetected, not by how wrong it would have been.
 
 | # | Defect | Why it ranks here |
 |---|---|---|
-| 1 | **Check 4 compared an index with itself and reported PASS** | A broken *measurement* gets caught by a check. A broken *check* catches nothing, including itself, and reports a green line in a summary table -- precisely the line nobody re-reads. |
-| 2 | **The static baseline was not being tuned, and the manifest said it was** | `max(key=nprobe)` returns the largest candidate unconditionally, and the latency target was then derived from that same config -- so the selection met the target by construction. The number was recoverable; the manifest's description of the method was not. A run record that misdescribes its own method is worse than a wrong number, because the description is what a reader trusts when they cannot re-derive. |
-| 3 | `compute_topk` dropped `‖q‖²` from its L2 expression | Every stored ground-truth distance off by a per-query constant. Score-equality recall would have compared against a meaningless threshold and produced a *plausible* number. Every ordering test the module had already passed. |
-| 4 | Timing harness ran variants in blocks | Reported a 3x spread between two configs doing provably identical work. Machine drift presented as a performance result, and it looked like one. |
-| 5 | `n_dist_modeled` was uncapped `ef·M` | Modelled work overstated by up to **29.5x**, on the field Phase 3 regresses its cost model against. |
-| 6 | `decide()` called twice per query | AIMD would have halved effort twice per overshoot, and `controller_overhead_us` would have measured only the second call -- an over-aggressive controller and an understated overhead, both readable as findings. |
-| 7 | Burners contended for ALU, not memory bandwidth | The query path is a scan over mmap'd arrays. The experiment would have applied almost no pressure, and "the controller did not react" would have looked like a result about the controller. |
-| 8 | Fork bomb: a script starting worker processes without a `__main__` guard | Windows `spawn` re-imports the parent module in every child, so each child re-ran the whole script recursively. Fixed *inside* `Burners.start()`, which now refuses to launch from an unguarded module -- fixing only the script would have left the trap armed for the next caller. |
+| 1 | **Check 4 compared an index with itself and reported PASS** | A broken *measurement* gets caught by a check. A broken *check* catches nothing, including itself, and reports a green line in a summary table — the line nobody re-reads. |
+| 2 | **A generated conclusion was hardcoded while its numbers were computed** | `headline_sentence()` ended with "the mechanism works; the control law does not". True of the run it was written for; false of the next, where it printed beside a *negative* recall cost. The prose would have been quoted into this report as a measured finding. |
+| 3 | **The static baseline was not tuned, and the manifest said it was** | `max(key=nprobe)` returns the largest candidate unconditionally, and the target was derived from that same row, so selection met the target by construction. The number was recoverable; the manifest's description of its own method was not. |
+| 4 | `compute_topk` dropped `‖q‖²` | Every ground-truth distance off by a per-query constant. Score-equality recall would have compared against a meaningless threshold and produced a *plausible* number. |
+| 5 | Timing harness ran variants in blocks | A 3× spread between two configs doing provably identical work. Machine drift presented as a performance result. |
+| 6 | Uncapped `ef·M` distance model | Overstated work by up to **29.5×**, on the field Phase 3 regresses against. |
+| 7 | Footprint measured in a long-lived process | Same index read 5.18 MB or 38.24 MB depending on what ran before it. Changed a headline claim from 1.47× to 11.36× of the paper. |
+| 8 | `decide()` called twice per query | AIMD halving effort twice per overshoot; overhead measured on the wrong call. |
+| 9 | Overhead as a ratio of percentiles | Reported p95 *below* p50 — impossible for one distribution. Understated the worst case 5×. |
+| 10 | Violations scored against the run's original target | Target-step's middle phase measured compliance with a budget no longer in force: static read 0.1% when it was 28.2%. |
+| 11 | Burners contended for ALU, not memory bandwidth | The experiment would have applied almost no pressure, and "the controller did not react" would have looked like a result. |
+| 12 | Shared time origin across sequential runs | Second run's data fell outside the zoom window: one figure panel empty, another showing a single policy. |
+| 13 | `_controller_p95` referenced but never defined | A patch aborted before writing it; the figure still rendered, using the wrong estimator while labelled as the right one. |
+| 14 | Timing runs corrupted by background load, **three times** | Once by a concurrent experiment, once by this project's own O(n²) figure generation perturbing the latencies it was plotting, once by leftover load. |
+| 15 | Fork bomb from a missing `__main__` guard | Windows `spawn` re-imported the parent module in every child, recursively. |
+| 16 | `nc="auto"` overridden for SIFT with the reason in a registry string | A real decision recorded where the decision log could not see it. |
 
-### Three detection mechanisms, and what each costs
+### Five detection mechanisms, and what each costs
 
-The eight did not fall to one method, and the differences are the point.
+- **Caught by loud failure** (#15). Free. The machine fell over.
+- **Caught by reading the code** (#1, #3, #8, #11, #14, #16). Cheap, but depends
+  on someone reading the right lines on the right day. Six of sixteen, which is
+  not a system.
+- **Caught by rendering the artifact and looking at it** (#12, #13). Neither a
+  threshold nor a test would fire: the script exited 0 and wrote a valid PNG
+  both times. Only opening the file revealed an empty panel.
+- **Caught by rereading a generated conclusion against the numbers printed
+  beside it** (#2). Its own category, because narrative-generation bugs are
+  uniquely durable: the numbers were right, the sentence was wrong, and nothing
+  reruns a sentence. A hardcoded verdict in generated prose will eventually
+  state the opposite of its own data, and no test asserts on English.
+- **Caught by external reference** (#4, #5, #6, #7, #9, #10). The expensive
+  category, and the **only one that catches errors producing plausible
+  numbers**: published ground truth in the HDF5, an independent interleaved
+  control, a physical containment bound, a fresh-process measurement, an
+  impossible percentile ordering, a constraint that had changed.
 
-- **Caught by loud failure** (#8). Free. The failure announced itself; the
-  machine fell over and there was nothing to notice.
-- **Caught by looking** (#1, #2, #6, #7). Cheap, but depends on someone reading
-  the right lines on the right day. Four of eight, which is not a system.
-- **Caught by external reference** (#3, #4, #5). The expensive category, and the
-  **only one that catches errors producing plausible numbers**:
-  - `‖q‖²` — against the **published ground truth shipped in the HDF5**
-  - the blocked harness — against an **independent interleaved control**
-  - uncapped `ef·M` — against the **physical containment ceiling**
-
-None of those three was caught by an acceptance threshold. Each was caught by
-checking the number against something *outside the system that produced it*.
-
-**The ordering is itself the finding: the cost of detection is inversely
-proportional to how loudly a defect fails.** A fork bomb costs minutes. A recall
-metric quietly off by a per-query constant costs however long it takes someone
-to distrust a number that looks fine — and on this project, three separate
-external references were needed to find three such numbers.
+**The ordering is the finding: cost of detection is inversely proportional to
+how loudly a defect fails.** A fork bomb costs minutes. A recall metric quietly
+off by a per-query constant, or a sentence asserting a conclusion its own
+numbers contradict, costs however long it takes someone to distrust something
+that looks fine.
 
 That generalises better than a test count: **a test suite validates a system
 against its own assumptions, so the errors that survive are exactly the ones the
-assumptions share.** Published reference data, an independent control, and a
-physical bound are the three external checks available here, and all three
-earned their place.
+assumptions share** — and generated prose is outside the test suite entirely.
 
 ## 2. What is built
 
@@ -293,11 +302,50 @@ be read as *runtime-adaptive retrieval effort*, not as several independently
 useful ANN parameters.** C3, joint ANN+SCR control, remains genuinely
 two-dimensional.
 
+### Confirmatory run: the diagnosis is correct
+
+The diagnosis makes a falsifiable prediction — pace actions no faster than the
+feedback delay and the ratchet stops. The setting was **derived from
+already-measured data and committed before the controller change existed**
+(`docs/predeclared/control_period_test.json`, commit `62ee5bc`):
+`control_period_s = 4.05`, from 50 samples × the measured quiet latency at
+`nprobe=64` (81.40 ms). One run, one setting, all three possible outcomes
+described in advance.
+
+| | period = 0 (once per query) | period = 4.05 s |
+|---|---|---|
+| **quiet effort changes** | ~150 (sawtooth, ~0.4 s period) | **4 in 60 s** |
+| quiet `nprobe` p50 | **1** (floor) | **20** (static: 16) |
+| quiet recall | 0.4510 (static 0.8809) | **0.9115** (static 0.8806) |
+| contended violations | 9.1% (static 99.9%) | 12.0% (static 99.8%) |
+| recovery `nprobe` p50 | 1 | 7, violations 0.1% |
+
+**The change count is the result.** Four effort changes across the quiet phase
+against a continuous limit cycle is the ratchet stopping; the recall and
+`nprobe` averages are downstream of it. The controller now settles slightly
+above the tuned static baseline and earns *more* recall than it (0.9115 against
+0.8806) while both sit near target.
+
+Dropping to `nprobe=1` under contention is now correct rather than collapse:
+static demonstrates that 99.8% of queries miss the target at `nprobe=16` when
+the machine is 5.8× contended, so no effort level both serves and complies. The
+controller conceding recall there is the trade working.
+
+**Reported between "confirmed" and "partial", as pre-declared.** The ratchet
+stopped — that was the prediction and it held. But recovery is slow: additive
+increase now fires once per 4.05 s, so 60 s of recovery returned `nprobe` to 7
+rather than 20. **No second setting was run.** That is a separate question with
+its own predicted mechanism and its own declared value, recorded in
+`docs/predeclared/recovery_slope_test.json` and not scheduled.
+
 ### Phase 6 direction
 
-Act once per settling interval, or use an estimator whose response time is
-shorter than the action interval. Both are principled and pre-registrable from
-the diagnosis rather than found by searching over constants.
+**Standing rule, generalising beyond AIMD:** a control loop must act no faster
+than the feedback delay of the signal it reads, and this must be verified
+explicitly for any future policy — including a bandit, whose reward is a delayed
+observation in exactly the same sense. The failure is not a bad constant; it is
+a violated stability condition, and it is checkable before a line of policy code
+is written.
 
 ## 7. What is not built, and what gates it
 

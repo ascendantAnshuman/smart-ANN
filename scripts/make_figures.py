@@ -144,28 +144,46 @@ def phase_stats(df: pd.DataFrame, mf: dict, target: float) -> dict[str, dict[str
 
 
 def headline_sentence(stats: dict[str, dict[str, dict[str, float]]]) -> str:
-    """The sentences a supervisor will remember. Computed, never written by hand.
+    """The sentences a supervisor will remember. Computed, never asserted.
 
-    Two of them, because the first alone flatters the controller. The quiet-phase
-    comparison is the cleanest evidence that the fault is in the control law and
-    not in the mechanism: with NO disturbance, the adaptive policy misses the
-    target more often than the tuned static baseline while giving up half its
-    recall.
+    An earlier version ended with a fixed clause -- "the mechanism works; the
+    control law does not" -- which was true of the run it was written for and
+    false of the next one, where it printed alongside a NEGATIVE recall cost.
+    A generated sentence that carries a hardcoded conclusion will eventually
+    state the opposite of its own numbers, so the verdict is derived here.
     """
     s_c, a_c = stats["static"]["contended"], stats["aimd"]["contended"]
     s_q, a_q = stats["static"]["quiet"], stats["aimd"]["quiet"]
-    return (
+    q_gap = s_q["recall"] - a_q["recall"]
+
+    first = (
         f"Under contention the static policy exceeded its latency target on "
         f"{s_c['violation_pct']:.1f}% of queries and the adaptive policy on "
         f"{a_c['violation_pct']:.1f}%, at a cost of {s_c['recall'] - a_c['recall']:.3f} "
-        f"recall@10 ({s_c['recall']:.4f} -> {a_c['recall']:.4f}).\n"
-        f"BUT in the QUIET phase, with no disturbance at all, the adaptive policy missed "
-        f"the target on {a_q['violation_pct']:.1f}% of queries against static's "
-        f"{s_q['violation_pct']:.1f}%, while holding median nprobe at "
-        f"{a_q['nprobe_p50']:.0f} against {s_q['nprobe_p50']:.0f} and giving up "
-        f"{s_q['recall'] - a_q['recall']:.3f} recall. The mechanism works; the control "
-        f"law does not."
+        f"recall@10 ({s_c['recall']:.4f} -> {a_c['recall']:.4f})."
     )
+
+    # The quiet phase is the diagnostic: with no disturbance, does the controller
+    # sit where a sensible static config would, or has it collapsed?
+    collapsed = a_q["nprobe_p50"] <= max(2.0, 0.25 * s_q["nprobe_p50"])
+    if collapsed:
+        verdict = (
+            f"In the QUIET phase, with no disturbance at all, the adaptive policy missed "
+            f"the target on {a_q['violation_pct']:.1f}% against static's "
+            f"{s_q['violation_pct']:.1f}%, while holding median nprobe at "
+            f"{a_q['nprobe_p50']:.0f} against {s_q['nprobe_p50']:.0f} and giving up "
+            f"{q_gap:.3f} recall. It has collapsed to its floor: the mechanism works, "
+            f"the control law does not."
+        )
+    else:
+        gained = "gaining" if q_gap < 0 else "giving up"
+        verdict = (
+            f"In the QUIET phase it holds median nprobe at {a_q['nprobe_p50']:.0f} against "
+            f"static's {s_q['nprobe_p50']:.0f}, {gained} {abs(q_gap):.3f} recall at "
+            f"{a_q['violation_pct']:.1f}% over target against static's "
+            f"{s_q['violation_pct']:.1f}%. It is not collapsed to its floor."
+        )
+    return first + "\n" + verdict
 
 
 def feedback_delay_table(latency_by_nprobe: dict[int, float], window: int = 50) -> str:
