@@ -393,6 +393,87 @@ evaluated here is not marked PASS; Phase 3.5 fits and validates it on the phone.
 `t_cluster_load` is billed to the CPU current rather than the disk current, which
 is the measured departure from the paper (ADR-0026 amendment, ADR-0031).
 
+## 6c. Phase 5 and 6 — SCR, the profile table, and a third policy
+
+**SCR is built and its cost is measured. Its benefit is not measurable here.**
+Windows over a retrieved chunk, scored against the query, top-`k` kept,
+neighbours re-attached, overlaps merged. What the numbers say:
+
+| | latency p95 | violations | recall | context tokens | reduction |
+|---|---|---|---|---|---|
+| static, no SCR | 18.17 ms | 36.4% | 0.9017 | 538 | — |
+| static + SCR | **1223 ms** | 100% | 0.9134 | 369 | 30.4% |
+| adaptive, no SCR | 14.39 ms | 1.8% | 0.8625 | 538 | — |
+| adaptive + SCR | 1220 ms | 100% | 0.6916 | 370 | 30.2% |
+
+**SCR costs 67x the latency to remove 30% of the tokens**, because it embeds
+every window of every retrieved chunk on the query path — ten gte-small forward
+passes per query at k=5. Every SCR arm violates its budget outright, and the
+joint cell is *worse* than either single dimension: adaptation cannot recover a
+cost that large.
+
+This is **cost-only**. SCR's actual claim is answer quality per token, and that
+needs a generator; Phase 7 is blocked. Whether 30% fewer tokens ever repays 67x
+the latency is exactly the question this project currently cannot answer, and
+none of the above should be read as evidence either way.
+
+One configuration finding worth carrying (ADR-0035): a first run reported **0.0%
+reduction** while paying full cost, because 99.3% of SQuAD chunks hold ≤3
+sentences and a 3-sentence window yields exactly one window per chunk. SCR can
+only select among windows, so **its applicability is a property of the chunking,
+not of the reducer** — and a zero-reduction result would have read as "SCR does
+not help" rather than as a mismatch between two independently chosen defaults.
+
+### The profile table and the budget policy
+
+The controller now has three policies. The third reads a table of **measurements**
+rather than the Phase 3 cost model, because that model fails at 35.87% MAPE
+outside its fitted regime (ADR-0033) — a policy predicting from it would be most
+confident exactly where it is most wrong.
+
+```
+budget = 14.01 ms, fixed from the table before any policy ran
+
+  static   p95 14.20 ms   viol 6.0%   recall 0.8480   nprobe 12
+  aimd     p95 13.44 ms   viol 4.3%   recall 0.8103   nprobe 10
+  budget   p95  9.51 ms   viol 0.2%   recall 0.7797   nprobe  8
+```
+
+**The budget policy honours its declared latency budget at 0.2% violation — 30x
+better than static — for 0.068 recall.** Controller overhead stays under 0.2% of
+query latency for all three.
+
+**C4 is half-delivered, and the half is named.** Latency budgets work and are
+measured. Energy budgets have the machinery and no measurement:
+`BudgetPolicy.honours_energy_budget()` returns **False**, and every run manifest
+records it, because acting on a modelled energy as if measured is the precise
+failure the capability gate exists to prevent.
+
+**A methods note that cost a rebuild** (ADR-0036). The first profile sweep was
+*blocked*, so latency came out falling as effort rose and the derived Pareto
+front declared `nprobe` 1, 2, 4 and 8 "dominated and never worth choosing" —
+exactly the cheap levels a controller must reach for under pressure. ADR-0030
+had already required interleaving, having been written after the same mistake in
+a different harness. **A rule recorded once in a document does not propagate to
+code written later**, so the reason now lives in the sweep's own docstring.
+
+## 6d. Contribution scoreboard
+
+The phase table says what was built. This says what can be *claimed*, which is
+the number that matters and is consistently lower.
+
+| | Contribution | State | What is missing |
+|---|---|---|---|
+| **C1** | Runtime-adaptive ANN effort | **Demonstrated** — three independent experiments | Narrowed by measurement: `ef_centroid` is free and `ef_list` inert, so it is one-dimensional. Stated as *adaptive retrieval effort*, not "several ANN parameters". |
+| **C2** | Adaptive SCR aggressiveness | **Mechanism + cost only** | Answer quality. Needs a generator (Phase 7, blocked on MSVC). |
+| **C3** | Joint vs split control | **Both dimensions run, cost-only** | Same. The joint cell is currently *worse*, and without quality that cannot be interpreted. |
+| **C4** | Budget-constrained retrieval | **Half** — latency budgets honoured at 0.2% violation | Energy budgets: machinery exists, measurement does not. Needs the phone. |
+| **C5** | Battery / device-state policy | **Nothing** | Needs the phone. |
+
+**One of five is fully demonstrated; one is half; three are gated on hardware.**
+That gap between "code written" and "claim supported" is the honest state of the
+project, and it is not closed by writing more code.
+
 ## 7. What is not built, and what gates it
 
 | Not built | Gate |
@@ -400,7 +481,7 @@ is the measured departure from the paper (ADR-0026 amendment, ADR-0031).
 | Thermal model, energy model, DVFS tiers | A device trace. This machine can measure neither temperature nor energy — WMI thermal zone is access-denied without elevation, there is no RAPL on Windows, and WSL2 exposes no populated `powercap`. The Android phone is the **only** source. |
 | Selective Content Reduction (C2) | Phase 5; the sentence splitter it shares with chunking is already built. |
 | Bandit policy, Pareto policy, safety shield | Phase 6, which needs the Phase 3 cost model. |
-| Answer generation, EM/F1 | Phase 7. **Confirmed**: `llama-cpp-python` has no usable wheel for any version on CPython 3.12 / win-amd64, so it is a source build needing MSVC — and unlike hnswlib there is no differently-named redistribution to fall back on. |
+| Answer generation, EM/F1 | Phase 7. **Confirmed**: `llama-cpp-python` has no usable wheel for any version on CPython 3.12 / win-amd64, so it is a source build needing MSVC — and unlike hnswlib there is no differently-named redistribution to fall back on. This is what blocks C2's quality claim and C3's real comparison. |
 
 The energy and thermal dependency was **identified and recorded in Phase 1**
 (ADR-0007, ADR-0008), before any work was built on top of it — not discovered

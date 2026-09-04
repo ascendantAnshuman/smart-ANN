@@ -1,14 +1,20 @@
 """``smartann`` command line entry point.
 
-Subcommands that are not implemented yet raise ``NotImplementedError`` with the
-phase that will deliver them (Section 3, rule 2). They are never stubbed with a
-plausible return value, and each one has a matching line in ``TODO.md``.
+Every subcommand is implemented. While some were not, they raised with the phase
+that would deliver them rather than returning a plausible value (Section 3, rule
+2); that convention is kept for anything added later.
+
+The experiment and figure commands are thin front ends over the scripts that
+implement them, not second copies of their logic. Two implementations of an
+experiment is two experiments, and only one of them produced the recorded
+numbers.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -536,25 +542,79 @@ def index_info(root: Path = typer.Argument(..., help="Path to a built index dire
             typer.echo(f"  {term:26s} {mb:10.3f}")
 
 
-# ---------------------------------------------------------------------------
-# not yet implemented -- see TODO.md
-# ---------------------------------------------------------------------------
-
-
 @run_app.command("experiment")
 def run_experiment(
-    config: Path = typer.Argument(...),
-    seed: int = typer.Option(0, help="Random seed."),
+    name: str = typer.Argument(..., help="contention | target-step | matrix | profile"),
+    dataset: str = typer.Option("sift1m", help="Dataset to run against."),
+    seconds: float = typer.Option(60.0, help="Seconds per phase or per arm."),
 ) -> None:
-    """Run one experiment definition end to end."""
-    raise NotImplementedError("Phase 8: the experiment runner is not implemented yet.")
+    """Run one experiment end to end.
+
+    A thin front end over the scripts that already implement these, rather than a
+    second copy of their logic. The scripts stay the source of truth -- two
+    implementations of an experiment is two experiments, and only one of them
+    would be the one that produced the recorded numbers.
+    """
+    import subprocess
+
+    scripts = Path(__file__).resolve().parent.parent / "scripts"
+    plans: dict[str, list[str]] = {
+        "contention": [
+            str(scripts / "experiment_contention.py"),
+            "--dataset",
+            dataset,
+            "--quiet-s",
+            str(seconds),
+            "--contended-s",
+            str(seconds * 2),
+            "--recovery-s",
+            str(seconds),
+        ],
+        "target-step": [
+            str(scripts / "experiment_contention.py"),
+            "--dataset",
+            dataset,
+            "--mode",
+            "target-step",
+            "--quiet-s",
+            str(seconds),
+            "--contended-s",
+            str(seconds * 2),
+            "--recovery-s",
+            str(seconds),
+        ],
+        "matrix": [str(scripts / "experiment_matrix.py"), "--seconds-per-arm", str(seconds)],
+        "profile": [
+            str(scripts / "phase6_profile.py"),
+            "--dataset",
+            dataset,
+            "--profile-seconds",
+            str(seconds / 4),
+            "--compare-seconds",
+            str(seconds),
+        ],
+    }
+    if name not in plans:
+        raise typer.BadParameter(f"unknown experiment {name!r}; choose from {sorted(plans)}")
+
+    typer.echo(f"NOTE: nothing else must run while this measures (ADR-0030). Starting {name}.")
+    raise typer.Exit(subprocess.run([sys.executable, *plans[name]], check=False).returncode)
 
 
 @figures_app.command("make")
-def figures_make(experiment: str = typer.Argument(...)) -> None:
-    """Regenerate all figures for an experiment from its stored parquet."""
-    raise NotImplementedError("Phase 8: figure generation is not implemented yet.")
+def figures_make(
+    runs: Path = typer.Argument(None, help="Run directory; defaults to the newest E_DEMO_*."),
+    out: Path = typer.Option(Path("results/figures"), help="Where to write the figures."),
+) -> None:
+    """Regenerate figures for a run from its stored parquet.
 
+    Every number comes from the parquet or from a summary JSON; a missing input
+    fails loudly rather than drawing something plausible (Section 3, rule 1).
+    """
+    import subprocess
 
-if __name__ == "__main__":  # pragma: no cover
-    app()
+    script = Path(__file__).resolve().parent.parent / "scripts" / "make_figures.py"
+    argv = [sys.executable, str(script), "--out", str(out)]
+    if runs is not None:
+        argv += ["--runs", str(runs)]
+    raise typer.Exit(subprocess.run(argv, check=False).returncode)

@@ -6,21 +6,20 @@ value in the meantime.
 
 Keep this file in sync when a stub is filled in or a new one is added.
 
-## Phase 2 — EcoVector index
+## Nothing is stubbed
 
-Delivered. `index build` and `index info` are implemented; the index package,
-the acceptance harness and the recall metrics are in place. Nothing here raises
-`NotImplementedError` any more.
+Every CLI command is implemented; there are no `NotImplementedError` sites left
+in `smartann/`. A test asserts this, so a stub added later without a matching
+entry here will fail the suite rather than sit unnoticed.
 
-## Phase 3.5 — On-device trace capture (ADR-0008)
+## What remains, and what each needs
 
-- `smartann/telemetry/android.py` — Termux sysfs sampler; not written yet.
-- Trace capture script; blocked on the phone, not on code.
-
-## Phase 8 — Benchmark harness
-
-- `smartann/cli.py::run_experiment` — experiment driver; needs Phases 2, 3, 4, 6.
-- `smartann/cli.py::figures_make` — figure regeneration; needs the parquet schema from Phase 8.
+| Phase | Needs |
+|---|---|
+| 3.5 device trace | The phone. `scripts/device_probe.sh` answers all seven questions in one Termux run. |
+| 4 simulator | Phase 3.5's trace. Thermal constants must be FITTED from a real trace, never chosen. |
+| 7 generation | MSVC Build Tools (elevated install). |
+| 9 device validation | The phone, same gate as 3.5. |
 
 ## Known blockers (not stubs)
 

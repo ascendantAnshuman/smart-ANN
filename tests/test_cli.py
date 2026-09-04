@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from smartann import __version__
@@ -19,6 +18,7 @@ runner = CliRunner()
 
 EXPECTED_SUBCOMMANDS = ["version", "paths", "data", "index", "config", "run", "figures"]
 
+
 # Commands that must raise NotImplementedError until their phase lands.
 #
 # `data status`, `data prepare`, `data verify` and `data groundtruth` were on
@@ -27,12 +27,6 @@ EXPECTED_SUBCOMMANDS = ["version", "paths", "data", "index", "config", "run", "f
 # download and began writing a chunk database into the developer's data root.
 # Anything removed from this list must gain real coverage below, and
 # tests/conftest.py now isolates the data roots regardless.
-STUBS = [
-    ["run", "experiment", "E1.yaml"],
-    ["figures", "make", "E1"],
-]
-
-
 def test_help_lists_every_subcommand() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
@@ -84,13 +78,32 @@ def test_config_show_json(tmp_path: Path) -> None:
     assert '"nprobe": 4' in result.output
 
 
-@pytest.mark.parametrize("argv", STUBS, ids=lambda a: " ".join(a))
-def test_stub_raises_not_implemented(argv: list[str]) -> None:
-    """Unimplemented commands must fail loudly, never return a dummy value."""
-    result = runner.invoke(app, argv)
+def test_run_experiment_rejects_an_unknown_name() -> None:
+    """Every command is implemented now, so the contract is a real argument check."""
+    result = runner.invoke(app, ["run", "experiment", "not-an-experiment"])
     assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
-    assert "Phase" in str(result.exception), "the error must name the delivering phase"
+    assert "unknown experiment" in result.output
+
+
+def test_run_experiment_lists_the_experiments_it_knows() -> None:
+    result = runner.invoke(app, ["run", "experiment", "nope"])
+    for name in ("contention", "target-step", "matrix", "profile"):
+        assert name in result.output
+
+
+def test_figures_make_fails_loudly_on_a_missing_run() -> None:
+    """Section 3 rule 1: a missing input must fail, never draw something plausible."""
+    result = runner.invoke(app, ["figures", "make", "definitely-not-a-run-dir"])
+    assert result.exit_code != 0
+
+
+def test_no_command_raises_not_implemented_any_more() -> None:
+    """Phase 8 wired the last two; a stub left behind would be a silent gap."""
+
+    from smartann import cli
+
+    src = Path(cli.__file__).read_text(encoding="utf-8")
+    assert "NotImplementedError" not in src
 
 
 def test_no_args_shows_help() -> None:
