@@ -61,14 +61,32 @@ def _burn(stop: mp.Event, mb: int = 256) -> None:  # type: ignore[name-defined]
 class Burners:
     """A block of spinning processes, started and stopped around a phase."""
 
+    # Total footprint across all burners, not per burner. At 24 workers a
+    # 256 MB-each buffer would be 6 GB on a 15.6 GB machine, and a swapping
+    # host measures the pagefile rather than the controller.
+    TOTAL_MB = 3072
+
     def __init__(self, n: int) -> None:
         self.n = n
+        self.mb = max(64, self.TOTAL_MB // max(1, n))
         self._stop: mp.Event | None = None  # type: ignore[name-defined]
         self._procs: list[mp.Process] = []
 
     def start(self) -> None:
+        # Windows uses spawn, which re-imports the parent module in every child.
+        # A caller whose module-level code does real work will therefore run it
+        # again in each child -- recursively -- which is a fork bomb, not a
+        # subtle bug. Caught here so the failure names its own cause.
+        main_mod = sys.modules.get("__main__")
+        main_file = getattr(main_mod, "__file__", None)
+        if main_file and "if __name__" not in Path(main_file).read_text(encoding="utf-8"):
+            raise RuntimeError(
+                f'{Path(main_file).name} has no `if __name__ == "__main__":` guard. '
+                "multiprocessing spawn re-imports it in every child, so starting "
+                "burners from it would spawn recursively. Add the guard."
+            )
         self._stop = mp.Event()
-        self._procs = [mp.Process(target=_burn, args=(self._stop,)) for _ in range(self.n)]
+        self._procs = [mp.Process(target=_burn, args=(self._stop, self.mb)) for _ in range(self.n)]
         for p in self._procs:
             p.start()
 
@@ -137,6 +155,22 @@ def main() -> int:
     ap.add_argument("--recovery-s", type=float, default=60.0)
     ap.add_argument("--burners", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--mode",
+        choices=("contention", "target-step"),
+        default="contention",
+        help=(
+            "contention: apply CPU/memory pressure mid-run. "
+            "target-step: hold pressure constant and TIGHTEN the declared latency "
+            "target instead. Deterministic, reproduces on any machine, and exercises "
+            "the identical code path -- AIMD compares p95 against "
+            "constraints.latency_target_ms and does not care which side moved. It is "
+            "also closer to what SMART-ANN claims: C4 is explicitly "
+            "budget-constrained retrieval, so tracking a changing declared constraint "
+            "is C1 and C4 directly, where contention is a proxy for a thermal effect "
+            "this machine cannot measure."
+        ),
+    )
     args = ap.parse_args()
 
     paths = resolve_paths()
@@ -150,7 +184,7 @@ def main() -> int:
     queries = np.ascontiguousarray(queries[:2000], dtype=np.float32)
     gt_ids, gt_dists = gt_ids[:2000], gt_dists[:2000]
 
-    out_root = Path(args.out) if args.out else paths.results_root / "E_DEMO"
+    out_root = Path(args.out) if args.out else paths.results_root / f"E_DEMO_{args.mode}"
     out_root.mkdir(parents=True, exist_ok=True)
 
     print(f"=== tuning the static baseline on {args.dataset}, quiet ===", flush=True)
@@ -173,7 +207,9 @@ def main() -> int:
     note = (
         f"static nprobe={best_npb} chosen as the largest candidate whose quiet p95 "
         f"({best_p95:.2f} ms) is met by the target; target = 1.5 * that = {target_ms:.2f} ms. "
-        f"AIMD parameters fixed before the contention run and unchanged after."
+        f"AIMD parameters and target fixed before the disturbance run and unchanged after. "
+        f"NOTE: RollingWindow(size=50) is a DEFAULT, not a pre-registered choice -- it was "
+        f"not selected from data, unlike the target and the AIMD constants."
     )
     print(f"\n  {note}\n", flush=True)
 
@@ -218,13 +254,29 @@ def main() -> int:
                 duration_s=args.quiet_s,
                 window=window,
             )
-            writer.event("burners_start", workers=args.burners)
-            burners.start()
+            # The disturbance. Both modes emit the SAME event names, so every
+            # figure shades the middle phase identically without knowing which
+            # ran -- the controller does not know either.
+            if args.mode == "contention":
+                writer.event("burners_start", workers=args.burners)
+                burners.start()
+                mid = constraints
+            else:
+                tightened = Constraints(
+                    latency_target_ms=constraints.latency_target_ms / 2.0,
+                    latency_hard_ms=constraints.latency_hard_ms,
+                    energy_budget_mj=constraints.energy_budget_mj,
+                    min_recall=constraints.min_recall,
+                )
+                writer.event(
+                    "burners_start", mode="target-step", target_ms=tightened.latency_target_ms
+                )
+                mid = tightened
             n2 = run_queries(
                 index,
                 queries,
                 policy,
-                constraints,
+                mid,
                 monitor,
                 writer,
                 spec,
@@ -256,6 +308,7 @@ def main() -> int:
         parquet, _manifest = writer.write(
             extra={
                 "policy": name,
+                "mode": args.mode,
                 "tuning_note": note,
                 "latency_target_ms": target_ms,
                 "burners": args.burners,

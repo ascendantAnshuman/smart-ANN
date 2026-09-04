@@ -63,6 +63,54 @@ def _rolling_p95(t: np.ndarray, v: np.ndarray, window_s: float = 3.0) -> np.ndar
     return out
 
 
+def phase_stats(df: pd.DataFrame, mf: dict, target: float) -> dict[str, dict[str, float]]:
+    """SLO violation rate and recall per phase.
+
+    The violation rate is what makes the trade legible. Without it a reader sees
+    static holding recall flat while adaptive gives some up, and concludes static
+    won -- when static "won" recall by blowing through its latency budget.
+    """
+    a, b = _event_time(mf, "burners_start"), _event_time(mf, "burners_stop")
+    t = df["t_wall"].to_numpy()
+    phases = {
+        "quiet": t < a,
+        "contended": (t >= a) & (t < b),
+        "recovery": t >= b,
+    }
+    out: dict[str, dict[str, float]] = {}
+    for name, mask in phases.items():
+        if not mask.any():
+            continue
+        lat = df["t_total"].to_numpy()[mask]
+        rec = df["recall_at_k"].to_numpy(dtype=float)[mask]
+        ovh = df["controller_overhead_us"].to_numpy()[mask]
+        out[name] = {
+            "n": int(mask.sum()),
+            "violation_pct": float((lat > target).mean() * 100.0),
+            "p95_ms": float(np.percentile(lat, 95)),
+            "recall": float(np.nanmean(rec)) if np.isfinite(rec).any() else float("nan"),
+            "overhead_p50_pct": float(
+                np.percentile(ovh, 50) / 1000.0 / np.percentile(lat, 50) * 100
+            ),
+            "overhead_p95_pct": float(
+                np.percentile(ovh, 95) / 1000.0 / np.percentile(lat, 95) * 100
+            ),
+        }
+    return out
+
+
+def headline_sentence(stats: dict[str, dict[str, dict[str, float]]]) -> str:
+    """The one sentence a supervisor will remember. Computed, never written by hand."""
+    s_, a_ = stats["static"]["contended"], stats["aimd"]["contended"]
+    drop = s_["recall"] - a_["recall"]
+    return (
+        f"Under contention the static policy exceeded its latency target on "
+        f"{s_['violation_pct']:.1f}% of queries and the adaptive policy on "
+        f"{a_['violation_pct']:.1f}%, at a cost of {drop:.3f} recall@10 "
+        f"({s_['recall']:.4f} -> {a_['recall']:.4f})."
+    )
+
+
 def fig_headline(runs: dict[str, Path], out: Path) -> None:
     """The figure the project is about: does the controller hold the target?"""
     data = {name: _load_run(d) for name, d in runs.items()}
@@ -74,7 +122,14 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
         raise ValueError("manifest has no burners_start/burners_stop events to shade")
     target = float(ref["latency_target_ms"])
 
-    fig, axes = plt.subplots(3, 1, figsize=(11, 11))
+    stats = {name: phase_stats(df, mf, target) for name, (df, mf) in data.items()}
+    sentence = headline_sentence(stats)
+    print(f"\n  {sentence}\n", flush=True)
+    (out.parent / "headline_stats.json").write_text(
+        json.dumps({"sentence": sentence, "stats": stats}, indent=2), encoding="utf-8"
+    )
+
+    fig, axes = plt.subplots(4, 1, figsize=(11, 14), gridspec_kw={"height_ratios": [3, 3, 3, 2]})
     colors = {"static": "#c1121f", "aimd": "#0353a4"}
 
     # -- panel 1: the whole run -------------------------------------------
@@ -145,9 +200,38 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
         "The trade the controller makes: effort down, recall down, target held", fontsize=9
     )
 
+    # -- panel 4: the number the story rests on ----------------------------
+    ax = axes[3]
+    phases = ["quiet", "contended", "recovery"]
+    x = np.arange(len(phases))
+    for i, (name, st) in enumerate(stats.items()):
+        vals = [st.get(p, {}).get("violation_pct", 0.0) for p in phases]
+        bars = ax.bar(x + (i - 0.5) * 0.38, vals, 0.38, label=name, color=colors.get(name))
+        for b, v in zip(bars, vals, strict=True):
+            ax.annotate(
+                f"{v:.1f}%",
+                (b.get_x() + b.get_width() / 2, v),
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+    ax.set_xticks(x, phases)
+    ax.set_ylabel("queries over target (%)")
+    ax.set_title(sentence, fontsize=9, wrap=True)
+    ax.legend(fontsize=8)
+
+    fig.suptitle("")
+    fig.tight_layout()
     fig.savefig(out)
     plt.close(fig)
     print(f"wrote {out}", flush=True)
+    for name, st in stats.items():
+        c = st.get("contended", {})
+        print(
+            f"  {name:>7}: controller overhead p50 {c.get('overhead_p50_pct', float('nan')):.3f}% "
+            f"p95 {c.get('overhead_p95_pct', float('nan')):.3f}% of query latency",
+            flush=True,
+        )
 
 
 def fig_recall_effort(accept_json: Path, out: Path) -> None:

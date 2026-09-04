@@ -10,21 +10,35 @@ simulator, a placeholder, or a model presented as a measurement.
 
 ## 1. What the process caught
 
-Five defects, each caught before it produced a reported number. This is the part
-of the work that is hardest to see from the outside and most worth showing.
+Six defects, each caught before it produced a reported number.
 
-| What | What it would have caused | What caught it |
+**Ranked by danger, which is not the same as severity.** The ordering below is
+by how likely each was to survive undetected, and the most dangerous is not the
+one that would have been most wrong.
+
+| # | Defect | Why it ranks here |
 |---|---|---|
-| `compute_topk` dropped `‖q‖²` from its L2 expression | Every stored ground-truth distance off by a per-query constant; score-equality recall compared against a meaningless threshold | Storing distances for the first time, then testing **values** against `scipy.cdist` rather than ordering — every ordering test the module had already passed |
-| `n_dist_modeled` was uncapped `ef·M` | Modelled work overstated by up to **29.5×**; Phase 3 regresses its cost model on this field | Comparing the model against the physical containment ceiling |
-| Timing harness ran variants in blocks | Reported a 3× spread between two configs doing provably identical work; machine drift read as a result | An interleaved control, run unprompted after the numbers looked wrong |
-| `decide()` called twice per query | AIMD halving effort twice per overshoot; `controller_overhead_us` measuring only the second call | Reading the loop before running it |
-| Check 4 compared an index with itself | A permanent PASS on a check that could no longer fail | Noticing both variants returned identical numbers to four decimal places |
+| 1 | **Check 4 compared an index with itself and reported PASS** | A broken *measurement* gets caught by a check. A broken *check* catches nothing, including itself, and reports a green line in a summary table -- precisely the line nobody re-reads. |
+| 2 | `compute_topk` dropped `‖q‖²` from its L2 expression | Every stored ground-truth distance off by a per-query constant. Score-equality recall would have compared against a meaningless threshold and produced a *plausible* number. Every ordering test the module had already passed. |
+| 3 | Timing harness ran variants in blocks | Reported a 3x spread between two configs doing provably identical work. Machine drift presented as a performance result, and it looked like one. |
+| 4 | `n_dist_modeled` was uncapped `ef·M` | Modelled work overstated by up to **29.5x**, on the field Phase 3 regresses its cost model against. |
+| 5 | `decide()` called twice per query | AIMD would have halved effort twice per overshoot, and `controller_overhead_us` would have measured only the second call -- an over-aggressive controller and an understated overhead, both readable as findings. |
+| 6 | Burners contended for ALU, not memory bandwidth | The query path is a scan over mmap'd arrays. The experiment would have applied almost no pressure and "the controller did not react" would have looked like a result about the controller. |
 
-Two of these five would have produced *plausible* numbers rather than obvious
-errors, which is the case the discipline exists for.
+**The transferable point is what caught the dangerous ones.** Not the test suite:
 
----
+- `‖q‖²` — comparison against the **published ground truth shipped in the HDF5**
+- the blocked harness — an **independent interleaved control**
+- uncapped `ef·M` — **arithmetic against the physical containment ceiling**
+
+None of the three was caught by an acceptance threshold. Each was caught by
+checking the number against something *outside the system that produced it*.
+
+That generalises, and it is a better methods claim than a test count: **a test
+suite validates a system against its own assumptions, so the errors that survive
+are exactly the ones the assumptions share.** Published reference data, an
+independent control, and a physical bound are the three kinds of external check
+available here, and all three earned their place.
 
 ## 2. What is built
 
