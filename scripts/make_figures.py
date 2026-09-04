@@ -54,12 +54,24 @@ def _event_time(manifest: dict, name: str) -> float | None:
     return None
 
 
-def _rolling_p95(t: np.ndarray, v: np.ndarray, window_s: float = 3.0) -> np.ndarray:
-    """p95 over a trailing time window, so the x-axis stays wall-clock."""
+def _rolling_p95(
+    t: np.ndarray, v: np.ndarray, window_s: float = 3.0, stride: int = 1
+) -> np.ndarray:
+    """p95 over a trailing time window, so the x-axis stays wall-clock.
+
+    Evaluated every `stride` samples and held between, because the naive form is
+    O(n^2): a percentile over a growing slice for each of tens of thousands of
+    queries. That cost is not academic -- running it concurrently with an
+    experiment perturbed the very latencies the experiment was measuring, which
+    is how this was noticed.
+    """
     out = np.empty(v.size)
+    last = 0.0
     for i in range(v.size):
-        lo = np.searchsorted(t, t[i] - window_s, side="left")
-        out[i] = np.percentile(v[lo : i + 1], 95)
+        if i % stride == 0:
+            lo = np.searchsorted(t, t[i] - window_s, side="left")
+            last = float(np.percentile(v[lo : i + 1], 95))
+        out[i] = last
     return out
 
 
@@ -77,6 +89,14 @@ def phase_stats(df: pd.DataFrame, mf: dict, target: float) -> dict[str, dict[str
         "contended": (t >= a) & (t < b),
         "recovery": t >= b,
     }
+    # In target-step mode the MIDDLE phase runs against a tightened target, so a
+    # violation rate computed against the original budget measures compliance
+    # with a constraint that was not in force. The disturbance event carries the
+    # target that actually applied; use it where present.
+    phase_target = dict.fromkeys(phases, target)
+    for e in mf.get("events", []):
+        if e["name"] == "burners_start" and "target_ms" in e:
+            phase_target["contended"] = float(e["target_ms"])
     out: dict[str, dict[str, float]] = {}
     for name, mask in phases.items():
         if not mask.any():
@@ -84,31 +104,63 @@ def phase_stats(df: pd.DataFrame, mf: dict, target: float) -> dict[str, dict[str
         lat = df["t_total"].to_numpy()[mask]
         rec = df["recall_at_k"].to_numpy(dtype=float)[mask]
         ovh = df["controller_overhead_us"].to_numpy()[mask]
+        # Percentiles OF THE PER-QUERY RATIO, not a ratio of percentiles. The
+        # latter reported p95 (0.173%) BELOW p50 (0.570%), which is impossible
+        # for one distribution: latency's p95/p50 spread is wider than
+        # overhead's, so the larger denominator shrank the ratio. As written it
+        # would have read as "tiny even in the worst 5%", which was not measured.
+        ratio_pct = (ovh / 1000.0) / np.maximum(lat, 1e-9) * 100.0
+        tgt = phase_target[name]
         out[name] = {
             "n": int(mask.sum()),
-            "violation_pct": float((lat > target).mean() * 100.0),
+            "target_ms": tgt,
+            "violation_pct": float((lat > tgt).mean() * 100.0),
             "p95_ms": float(np.percentile(lat, 95)),
             "recall": float(np.nanmean(rec)) if np.isfinite(rec).any() else float("nan"),
-            "overhead_p50_pct": float(
-                np.percentile(ovh, 50) / 1000.0 / np.percentile(lat, 50) * 100
-            ),
-            "overhead_p95_pct": float(
-                np.percentile(ovh, 95) / 1000.0 / np.percentile(lat, 95) * 100
-            ),
+            "nprobe_p50": float(np.percentile(df["cfg_ann_nprobe"].to_numpy()[mask], 50)),
+            "overhead_p50_pct": float(np.percentile(ratio_pct, 50)),
+            "overhead_p95_pct": float(np.percentile(ratio_pct, 95)),
         }
     return out
 
 
 def headline_sentence(stats: dict[str, dict[str, dict[str, float]]]) -> str:
-    """The one sentence a supervisor will remember. Computed, never written by hand."""
-    s_, a_ = stats["static"]["contended"], stats["aimd"]["contended"]
-    drop = s_["recall"] - a_["recall"]
+    """The sentences a supervisor will remember. Computed, never written by hand.
+
+    Two of them, because the first alone flatters the controller. The quiet-phase
+    comparison is the cleanest evidence that the fault is in the control law and
+    not in the mechanism: with NO disturbance, the adaptive policy misses the
+    target more often than the tuned static baseline while giving up half its
+    recall.
+    """
+    s_c, a_c = stats["static"]["contended"], stats["aimd"]["contended"]
+    s_q, a_q = stats["static"]["quiet"], stats["aimd"]["quiet"]
     return (
         f"Under contention the static policy exceeded its latency target on "
-        f"{s_['violation_pct']:.1f}% of queries and the adaptive policy on "
-        f"{a_['violation_pct']:.1f}%, at a cost of {drop:.3f} recall@10 "
-        f"({s_['recall']:.4f} -> {a_['recall']:.4f})."
+        f"{s_c['violation_pct']:.1f}% of queries and the adaptive policy on "
+        f"{a_c['violation_pct']:.1f}%, at a cost of {s_c['recall'] - a_c['recall']:.3f} "
+        f"recall@10 ({s_c['recall']:.4f} -> {a_c['recall']:.4f}).\n"
+        f"BUT in the QUIET phase, with no disturbance at all, the adaptive policy missed "
+        f"the target on {a_q['violation_pct']:.1f}% of queries against static's "
+        f"{s_q['violation_pct']:.1f}%, while holding median nprobe at "
+        f"{a_q['nprobe_p50']:.0f} against {s_q['nprobe_p50']:.0f} and giving up "
+        f"{s_q['recall'] - a_q['recall']:.3f} recall. The mechanism works; the control "
+        f"law does not."
     )
+
+
+def feedback_delay_table(latency_by_nprobe: dict[int, float], window: int = 50) -> str:
+    """How long the controller's own feedback takes, as a function of its output.
+
+    The window is fixed in SAMPLES, so its delay in TIME varies with effort. A
+    controller whose feedback delay is a function of its own output is a harder
+    object than one with a fixed delay, and this argues for a time-based window
+    independently of the ratchet.
+    """
+    rows = [f"  window = {window} samples"]
+    for npb, ms in sorted(latency_by_nprobe.items()):
+        rows.append(f"    nprobe={npb:>3}: {ms:7.2f} ms/query -> {window * ms / 1000:6.2f} s delay")
+    return "\n".join(rows)
 
 
 def fig_headline(runs: dict[str, Path], out: Path) -> None:
@@ -138,7 +190,7 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
         t = df["t_wall"].to_numpy() - t0
         ax.plot(
             t,
-            _rolling_p95(t, df["t_total"].to_numpy()),
+            _rolling_p95(t, df["t_total"].to_numpy(), stride=25),
             lw=1.4,
             color=colors.get(name),
             label=f"{name} (n={len(df):,})",
@@ -155,7 +207,7 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
     lo, hi = burn_a - t0 - 10.0, burn_a - t0 + 10.0
     for name, (df, _mf) in data.items():
         t = df["t_wall"].to_numpy() - t0
-        p95 = _rolling_p95(t, df["t_total"].to_numpy())
+        p95 = _rolling_p95(t, df["t_total"].to_numpy(), stride=25)
         m = (t >= lo) & (t <= hi)
         ax.plot(t[m], p95[m], lw=1.6, color=colors.get(name), label=name)
     ax.axhline(target, ls="--", c="k", lw=1.2)
