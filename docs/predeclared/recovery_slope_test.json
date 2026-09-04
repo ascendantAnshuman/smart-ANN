@@ -1,0 +1,29 @@
+{
+  "written_before_execution": true,
+  "test_id": "E_PREDICT_recovery_slope",
+  "status_at_declaration": "NOT RUN. Declared now so that it is a separate test with its own prediction, rather than a second setting quietly appended to E_PREDICT_control_period.",
+
+  "why_this_is_a_separate_test": "E_PREDICT_control_period asked one question -- does pacing actions to the feedback delay stop the ratchet -- and answered it: yes, 4 effort changes in the quiet phase against roughly 150 before. Recovery slope is a different question that the same run happened to expose. Running a second period value under the first test's banner would convert a controlled experiment into a search over constants, which is the exact failure the pre-declaration protocol exists to prevent.",
+
+  "observation_that_motivates_it": {
+    "run": "E_PREDICT, control_period_s = 4.05",
+    "finding": "After contention lifts, nprobe recovers to a median of 7 over a 60 s recovery phase, not to the 20 it held before the disturbance. Violations are 0.1%, so the controller is compliant but is leaving recall on the table.",
+    "quiet_nprobe_p50": 20,
+    "recovery_nprobe_p50": 7,
+    "recovery_seconds": 60
+  },
+
+  "predicted_mechanism": "Additive increase fires once per control period rather than once per query, so effort climbs by additive_increase per control_period_s. Time to recover from effort e0 to e1 is therefore (e1 - e0) / additive_increase * control_period_s, i.e. recovery time scales LINEARLY with the control period and inversely with the increase step. At 4.05 s and 0.05 per step, climbing from the floor to effort 0.3 takes about 24 s, which matches a 60 s phase reaching nprobe 7 rather than 20.",
+
+  "falsifiable_consequence": "Halving the control period should roughly halve the time to return to the pre-disturbance nprobe, without reintroducing the ratchet -- provided the period still exceeds the feedback delay at the operating effort.",
+
+  "declared_setting_for_the_future_run": {
+    "control_period_s": 1.0,
+    "derivation": "50 samples x the measured quiet latency at nprobe=20 (~20 ms) = 1.0 s. Still at or above the feedback delay at the operating point the controller settles on, so the stability condition is respected; it is the delay at nprobe=64 that 4.05 s was sized against, and the controller does not operate there.",
+    "risk": "If the controller transiently visits high nprobe, the feedback delay there exceeds 1.0 s and the ratchet may partially return. That is the informative failure mode and would itself be the result."
+  },
+
+  "protocol": "One run at control_period_s = 1.0. Report recovery time to pre-disturbance nprobe AND the quiet-phase effort-change count, because the second is what shows whether stability was traded away for recovery speed. If the ratchet returns, report that; do not search for a third value.",
+
+  "not_scheduled": "This is not part of the current sprint. It is recorded so the question is not rediscovered as prose later."
+}
