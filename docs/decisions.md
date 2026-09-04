@@ -1572,3 +1572,55 @@ fit. This surfaced from a unit test whose synthetic `bytes_read` was exactly
 proportional to `n_cluster_loads`: the fit put all the weight on one feature and
 none on the other, which is what perfect collinearity does and what near-perfect
 collinearity does more quietly.
+
+---
+
+## ADR-0034 — SCR reduces generation cost, and Phase 5 cannot measure whether that is worth it
+
+**Status.** Accepted. Phase 5 delivers the mechanism and its cost; the benefit is
+not measurable until Phase 7 exists.
+
+**What was built.** Sentence windows over a retrieved chunk, scored against the
+query embedding, top-`k` kept above a threshold, neighbours re-attached,
+overlapping spans merged. Driven entirely by the five fields already on
+`ScrConfig` -- no new knobs, because those fields are the Section 6 contract.
+
+**Three properties the implementation is built around.**
+
+1. **Disabled means untouched.** `enabled=False` returns the input byte for byte
+   *and does not call the encoder at all*. The C2 ablation compares against this
+   baseline, so an "off" path that still normalised whitespace would measure the
+   normaliser as part of the reduction, and one that still embedded would charge
+   the ablation for a cost it does not incur.
+2. **The decision is reproducible from stored data.** Kept spans are sentence
+   indices into the source, so a `QueryRecord` is enough to reconstruct exactly
+   what was dropped without re-running the embedder.
+3. **Overlapping kept windows are merged.** Windows overlap by construction, and
+   emitting a sentence twice would inflate the very token count SCR exists to
+   reduce -- a bug that would have made aggressive settings look *worse* than
+   mild ones.
+
+**A deliberate refusal to return nothing.** When the threshold excludes every
+window, the best window is kept anyway. An empty context would surface downstream
+as a generation failure rather than as the retrieval miss it actually is, and
+those need different fixes.
+
+**The scores are SIMILARITIES, not distances.** Larger is better here, which is
+the opposite of the convention the index stores (ADR-0018). Conflating them would
+rank every window backwards while still producing plausible-looking output, so
+the direction is asserted by test rather than left to a comment.
+
+**What Phase 5 cannot deliver, stated rather than implied.** SCR's value is
+answer quality per token, and answer quality needs a generator. Phase 7 is
+blocked on the MSVC toolchain (confirmed: no `llama-cpp-python` wheel exists for
+any version on this platform). So Phase 5 reports **reduction ratio and token
+counts only** -- there is no EM, no F1, and no claim that reduction preserves
+answer quality. `approx_tokens()` is characters over a documented constant, named
+`approx_` precisely so nothing downstream reads it as a token measurement.
+
+**Consequence for C2 and C3.** The mechanism now exists, so the *action space*
+for C3 is genuinely two-dimensional (`nprobe` x SCR aggressiveness) for the first
+time -- ADR-0033 having reduced C1 to one dimension on its own. But C2's claim,
+"adaptive SCR aggressiveness improves the quality-cost trade-off", cannot be
+evaluated until a generator exists to measure quality. Until then C3 can be run
+as a cost-only study and must be labelled as one.
