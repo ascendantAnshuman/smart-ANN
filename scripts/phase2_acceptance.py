@@ -13,7 +13,9 @@ import argparse
 import gc
 import itertools
 import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -46,7 +48,11 @@ def report(name: str, passed: bool, detail: str) -> None:
     print(f"[{'PASS' if passed else 'FAIL'}] {name}{chr(10)}       {detail}{chr(10)}", flush=True)
 
 
-CONFIG_DIR = Path("configs/index")
+# Anchored to this file, not to the working directory. A relative path turns
+# "run from the wrong directory" into every check reporting FAIL with "no index
+# built" -- a silent misreport, which is exactly the failure mode the
+# no-fabrication rules exist to prevent.
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs" / "index"
 
 
 def index_root(dataset: str, variant: str) -> IndexPaths | None:
@@ -58,7 +64,15 @@ def index_root(dataset: str, variant: str) -> IndexPaths | None:
     land last -- which is fine until the first --force rebuild and wrong
     thereafter, with no symptom. The config file is what the build was told to
     do, so it is what the check should ask about.
+
+    Returns None only when the index is genuinely not built. A missing config
+    *directory* is a broken checkout rather than a missing index, and raises.
     """
+    if not CONFIG_DIR.is_dir():
+        raise FileNotFoundError(
+            f"{CONFIG_DIR} does not exist. Without it every check would report "
+            "'no index built' and FAIL, which is a misreport rather than a result."
+        )
     cfg_path = CONFIG_DIR / f"{dataset}_{variant}.yaml"
     if not cfg_path.exists():
         return None
@@ -100,25 +114,33 @@ def check1a_exhaustive_equivalence(dataset: str = "sift1m", n_sub: int = 10_000)
     # carry -- and it would be wrong the moment a dataset changed metric.
     space = spec_for(dataset).search_space
 
-    out = IndexPaths(paths.data_root / "index" / f"_check1a_{dataset}")
-    res = build_ecovector(
-        base,
-        dataset=dataset,
-        space=space,
-        nc=200,
-        m=16,
-        ef_construction=100,
-        min_graph_size=32,
-        seed=42,
-        config_hash="check1a",
-        out=out,
-        quiet=True,
-    )
-    m = res.meta
-    coverage_ok = m.n_flat_clusters >= 5 and m.n_graph_clusters >= 5
+    # A scratch index, not a deliverable: built for this check and removed
+    # afterwards, so it never sits in the index root looking like a real
+    # artifact that something might later resolve or report on.
+    tmp = Path(tempfile.mkdtemp(prefix=f"smartann_check1a_{dataset}_"))
+    try:
+        out = IndexPaths(tmp / "idx")
+        res = build_ecovector(
+            base,
+            dataset=dataset,
+            space=space,
+            nc=200,
+            m=16,
+            ef_construction=100,
+            min_graph_size=32,
+            seed=42,
+            config_hash="check1a",
+            out=out,
+            quiet=True,
+        )
+        m = res.meta
+        coverage_ok = m.n_flat_clusters >= 5 and m.n_graph_clusters >= 5
 
-    idx = EcoVectorIndex.open(out.root)
-    rep = check_equivalence(idx, base, queries, k=10)
+        idx = EcoVectorIndex.open(out.root)
+        rep = check_equivalence(idx, base, queries, k=10)
+        del idx
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     report(
         f"1a. exhaustive equivalence ({dataset} {n_sub:,}-vector subset, nc=200)",
@@ -189,54 +211,102 @@ def check2_ef_monotonicity(dataset: str = "sift1m") -> None:
     )
 
 
+def _sweep_cost_recall(
+    index: object,
+    queries: np.ndarray,
+    gi: np.ndarray,
+    gd: np.ndarray,
+    grid: list[AnnConfig],
+) -> list[tuple[str, float, float, float]]:
+    """(label, mean distance computations, recall, ms/query) for each config."""
+    out = []
+    for cfg in grid:
+        total_dist = 0
+        t0 = time.perf_counter()
+        ids = np.full((queries.shape[0], cfg.k), -1, dtype=np.int64)
+        dists = np.full((queries.shape[0], cfg.k), np.inf, dtype=np.float64)
+        for qi in range(queries.shape[0]):
+            r = index.search(queries[qi], cfg)  # type: ignore[attr-defined]
+            n = min(r.ids.size, cfg.k)
+            ids[qi, :n], dists[qi, :n] = r.ids[:n], r.dists[:n]
+            total_dist += r.n_distance_computations
+        ms = (time.perf_counter() - t0) * 1000 / queries.shape[0]
+        se, _ = recall_at_k_batch(ids, dists, gi, gd, k=cfg.k)
+        label = f"nprobe={cfg.nprobe},ef={cfg.ef_list}"
+        out.append((label, total_dist / queries.shape[0], float(se.mean()), ms))
+    return sorted(out, key=lambda row: row[1])
+
+
 def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
-    """Two claims, reported separately because they point opposite ways here."""
+    """Recall against WORK, plus wall-clock as a separate claim.
+
+    Not against ``ef_list``. Two reasons that axis is wrong here:
+
+    1. ``finish()`` calls ``set_ef(max(ef_list, per_cluster_k))``, so with
+       ``per_cluster_k=32`` every ``ef_list <= 32`` is the same configuration.
+       A sweep from 16 upward silently duplicates its first points for
+       EcoVector while flat's ``ef=16`` really is 16, and any "reaches the
+       target at a lower ef" verdict is then partly an artifact of the flooring.
+    2. Even without that, ``ef_list`` is not work-equivalent across the
+       variants: EcoVector at ``nprobe=16`` examines up to 16 x per_cluster_k
+       candidates under the same label that gives flat roughly ``ef``.
+
+    So the x-axis is ``n_distance_computations``. **That number is itself partly
+    a model**: flat clusters count their comparisons exactly, graph traversal is
+    estimated as ``ef * M``. This therefore compares two cost models on equal
+    terms rather than measuring real distance evaluations, and the conclusion is
+    only as good as that shared model. Wall-clock, reported separately below, is
+    the measured quantity.
+    """
     eco_p, flat_p = index_root(dataset, "ecovector"), index_root(dataset, "flat_hnsw")
     if eco_p is None or flat_p is None:
-        report(f"4. ef-efficiency vs flat HNSW ({dataset})", False, "both indexes must be built")
+        report(f"4. work-efficiency vs flat HNSW ({dataset})", False, "both indexes must be built")
         return
     eco, flat = EcoVectorIndex.open(eco_p.root), FlatHnswIndex.open(flat_p.root)
     _, queries, gi, gd = load_all(dataset)
     nq = min(300, queries.shape[0])
+    q, gi, gd = queries[:nq], gi[:nq], gd[:nq]
     target = 0.90
+    pck = 32
 
-    def sweep(index: object, is_eco: bool) -> list[tuple[int, float, float]]:
-        out = []
-        for ef in (16, 32, 64, 128, 256, 512):
-            cfg = AnnConfig(
-                nprobe=16 if is_eco else 1, ef_centroid=64, ef_list=ef, k=10, per_cluster_k=32
-            )
-            t0 = time.perf_counter()
-            ids, dists = _run(index, queries[:nq], cfg)
-            ms = (time.perf_counter() - t0) * 1000 / nq
-            se, _ = recall_at_k_batch(ids, dists, gi[:nq], gd[:nq], k=10)
-            out.append((ef, float(se.mean()), ms))
-        return out
+    # Every ef_list >= per_cluster_k, so no two EcoVector points collapse onto
+    # the same effective configuration.
+    eco_grid = [
+        AnnConfig(nprobe=npb, ef_centroid=64, ef_list=ef, k=10, per_cluster_k=pck)
+        for npb, ef in ((2, 32), (4, 32), (8, 64), (16, 64), (16, 128), (32, 256), (64, 512))
+    ]
+    flat_grid = [
+        AnnConfig(nprobe=1, ef_centroid=64, ef_list=ef, k=10, per_cluster_k=pck)
+        for ef in (16, 32, 64, 128, 256, 512, 1024)
+    ]
+    eco_s = _sweep_cost_recall(eco, q, gi, gd, eco_grid)
+    flat_s = _sweep_cost_recall(flat, q, gi, gd, flat_grid)
 
-    eco_s, flat_s = sweep(eco, True), sweep(flat, False)
-
-    def ef_for(sweep_rows: list[tuple[int, float, float]]) -> tuple[int | None, float]:
-        for ef, rec, ms in sweep_rows:
+    def cost_for(rows: list[tuple[str, float, float, float]]) -> tuple[float, float, str]:
+        for label, ndist, rec, ms in rows:
             if rec >= target:
-                return ef, ms
-        return None, float("nan")
+                return ndist, ms, label
+        return float("nan"), float("nan"), "not reached"
 
-    eco_ef, eco_ms = ef_for(eco_s)
-    flat_ef, flat_ms = ef_for(flat_s)
-    ok = eco_ef is not None and flat_ef is not None and eco_ef <= flat_ef
+    eco_cost, eco_ms, eco_lbl = cost_for(eco_s)
+    flat_cost, flat_ms, flat_lbl = cost_for(flat_s)
+    ok = np.isfinite(eco_cost) and np.isfinite(flat_cost) and eco_cost <= flat_cost
 
-    lines = [f"{'ef':>5} {'ecovector':>20} {'flat_hnsw':>20}"]
-    for (ef, er, ems), (_, fr, fms) in zip(eco_s, flat_s, strict=True):
-        lines.append(f"{ef:>5} {er:>10.4f} {ems:>7.3f}ms {fr:>10.4f} {fms:>7.3f}ms")
-    lines.append("")
-    lines.append(
-        f"EF-EFFICIENCY (the claim measurable here): recall>={target:.2f} reached at "
-        f"ef_list={eco_ef} (ecovector) vs {flat_ef} (flat_hnsw)"
-    )
-    lines.append(f"WALL-CLOCK (a separate claim): {eco_ms:.3f} ms vs {flat_ms:.3f} ms per query")
-    lines.append(compare_note())
-
-    report(f"4. ef-efficiency vs flat HNSW ({dataset})", ok, NL.join(lines))
+    lines = ["ecovector:", f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms/query':>9}"]
+    lines += [f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>9.3f}" for lbl, nd, rec, ms in eco_s]
+    lines += ["", "flat_hnsw:", f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms/query':>9}"]
+    lines += [f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>9.3f}" for lbl, nd, rec, ms in flat_s]
+    lines += [
+        "",
+        f"WORK-EFFICIENCY: recall>={target:.2f} at {eco_cost:,.0f} modelled distance "
+        f"computations ({eco_lbl}, ecovector) vs {flat_cost:,.0f} ({flat_lbl}, flat_hnsw)",
+        "  NOTE: n_distance_computations is exact for flat clusters and MODELLED as ef*M for "
+        "graph traversal, so this compares two cost models on equal terms rather than counting "
+        "real distance evaluations.",
+        f"WALL-CLOCK (separate claim, measured): {eco_ms:.3f} ms vs {flat_ms:.3f} ms per query",
+        compare_note(),
+    ]
+    report(f"4. work-efficiency vs flat HNSW ({dataset})", ok, NL.join(lines))
 
 
 def check5_resident_footprint(dataset: str) -> None:

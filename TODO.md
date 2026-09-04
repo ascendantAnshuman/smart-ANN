@@ -8,9 +8,9 @@ Keep this file in sync when a stub is filled in or a new one is added.
 
 ## Phase 2 — EcoVector index
 
-- `smartann/cli.py::index_build` — EcoVector build. Unblocked (ADR-0017): `hnswlib`
-  is available via `chroma-hnswlib==0.7.5` on CPython 3.12.
-- `smartann/cli.py::index_info` — index metadata + memory model.
+Delivered. `index build` and `index info` are implemented; the index package,
+the acceptance harness and the recall metrics are in place. Nothing here raises
+`NotImplementedError` any more.
 
 ## Phase 3.5 — On-device trace capture (ADR-0008)
 
