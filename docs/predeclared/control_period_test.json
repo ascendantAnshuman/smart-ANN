@@ -1,0 +1,29 @@
+{
+  "written_before_execution": true,
+  "test_id": "E_PREDICT_control_period",
+  "status_at_declaration": "not yet run",
+
+  "prediction": "Raising the control period to the observation window's fill time will stop the ratchet. The controller currently decides once per query while reading a 50-sample windowed p95, so any action is invisible to its own signal for ~50 queries; it therefore acts on up to fifty superseded decisions. Multiplicative decrease under a violated stability condition ratchets to the floor by construction. Pacing actions no faster than the feedback delay should remove the ratchet.",
+
+  "declared_setting": {
+    "control_period_s": 4.05,
+    "derivation": "50 samples x quiet latency at nprobe=64 (81.40 ms) = 4.07 s, rounded to 4.05",
+    "source_of_81_40_ms": "static tuning sweep, quiet phase, contention experiment run",
+    "derived_from": "already-measured data, before this run executed"
+  },
+
+  "protocol": {
+    "runs": 1,
+    "settings_tested": 1,
+    "sweep": false,
+    "note": "A single confirmatory run at one pre-declared setting. This is testing a stated prediction, not searching a space. The distinction is entirely that the value was derived and written down before execution."
+  },
+
+  "outcomes_declared_in_advance": {
+    "confirmed": "ratchet stops, disturbed p95 held near target, recall stays materially above the floor -> structural diagnosis confirmed; report as a control-loop design finding (feedback delay vs control period), NOT as constant tuning",
+    "partial": "ratchet stops but the loop overshoots or undershoots -> mechanism right, additional tuning surface exists; a second value would be a NEW separately-declared test, not a continuation of this one",
+    "refuted": "ratchet does not stop -> the observation-delay theory is incomplete. Report as a negative result. Do NOT quietly try another period and report only the one that worked."
+  },
+
+  "commitment": "The outcome is reported whichever of the three it is."
+}
