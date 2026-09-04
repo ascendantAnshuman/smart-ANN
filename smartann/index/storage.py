@@ -67,7 +67,10 @@ class IndexBuildConfig:
     nc: int | str = "auto"  # "auto" resolves to round(sqrt(n_base)) via the registry
     m: int = 32
     ef_construction: int = 200
-    min_graph_size: int = 32
+    # Default is 'every cluster flat'. Measurement A found no M at which the
+    # per-cluster graphs beat brute force at matched recall (ADR-0028); a
+    # smaller value restores them for the ablation.
+    min_graph_size: int = 1 << 62
     seed: int = 42
     index_variant: str = "ecovector"  # ecovector | flat_hnsw | ivf_disk
     # k-means settings live here, and therefore in the config hash, because they
@@ -105,10 +108,21 @@ class IndexPaths:
         return self.root / "clusters"
 
     def cluster_file(self, cid: int, kind: str) -> Path:
-        suffix = {CLUSTER_GRAPH: ".bin", CLUSTER_FLAT: ".npz"}.get(kind)
+        suffix = {CLUSTER_GRAPH: ".bin", CLUSTER_FLAT: ".npy"}.get(kind)
         if suffix is None:
             raise ValueError(f"cluster kind {kind!r} has no file on disk")
         return self.clusters / f"{cid:05d}{suffix}"
+
+    def cluster_ids_file(self, cid: int) -> Path:
+        """Global ids for a flat cluster, beside its vectors.
+
+        Two plain .npy files rather than one .npz, because np.load can
+        memory-map a .npy and cannot map inside a zip archive. Mapping is the
+        whole point: it gives zero-copy access with no reconstruction, which is
+        most of what a cluster cache would have bought without introducing a
+        cache (ADR-0029).
+        """
+        return self.clusters / f"{cid:05d}.ids.npy"
 
     @classmethod
     def for_build(cls, index_root: Path, dataset: str, config_hash: str) -> IndexPaths:

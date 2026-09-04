@@ -233,9 +233,10 @@ def test_flat_and_graph_clusters_report_the_same_units(
     assert flat and graph, "need both kinds to compare them"
 
     q = base[0]
-    with np.load(idx.paths.cluster_file(flat[0], CLUSTER_FLAT)) as z:
-        flat_d = _brute_force(q, np.asarray(z["vectors"]), "l2")
-        flat_ids = np.asarray(z["ids"])
+    # Flat clusters are two memory-mapped .npy files (ADR-0029), not one .npz.
+    flat_vecs = np.asarray(np.load(idx.paths.cluster_file(flat[0], CLUSTER_FLAT), mmap_mode="r"))
+    flat_ids = np.asarray(np.load(idx.paths.cluster_ids_file(flat[0]), mmap_mode="r"))
+    flat_d = _brute_force(q, flat_vecs.astype(np.float32), "l2")
 
     g = hnswlib.Index(space="l2", dim=DIM)
     g.load_index(
@@ -508,3 +509,49 @@ def test_force_rebuild_clears_stale_cluster_files(tmp_path: Path) -> None:
         quiet=True,
     )
     assert not stale.exists(), "a rebuild must not inherit files from the previous build"
+
+
+def test_flat_clusters_are_memory_mappable(tmp_path: Path) -> None:
+    """Zero-copy access with no reconstruction is why the graphs could go.
+
+    A .npz is a zip archive and np.load cannot map inside one, so flat clusters
+    are stored as two plain .npy files. Mapping is most of what a cluster cache
+    would have bought, without introducing a cache (ADR-0029).
+    """
+    base = _corpus(200, seed=21)
+    out = IndexPaths(tmp_path / "mm")
+    build_ecovector(
+        base,
+        dataset="s",
+        space="l2",
+        nc=8,
+        m=8,
+        ef_construction=64,
+        min_graph_size=1 << 62,
+        seed=1,
+        config_hash="h",
+        out=out,
+        quiet=True,
+    )
+    idx = EcoVectorIndex.open(out.root)
+    assert idx.meta.n_graph_clusters == 0
+
+    cid = int(np.argmax(idx.sizes))
+    vecs = np.load(idx.paths.cluster_file(cid, CLUSTER_FLAT), mmap_mode="r")
+    ids = np.load(idx.paths.cluster_ids_file(cid), mmap_mode="r")
+    assert isinstance(vecs, np.memmap), "vectors must be mappable, not read into anon memory"
+    assert isinstance(ids, np.memmap)
+    assert vecs.shape == (int(idx.sizes[cid]), DIM)
+    assert ids.shape == (int(idx.sizes[cid]),)
+
+    r = idx.search(base[0], AnnConfig(nprobe=8, ef_centroid=16, ef_list=32, k=5, per_cluster_k=10))
+    assert r.ids.size == 5
+    assert np.all(np.diff(r.dists) >= -1e-9)
+
+
+def test_graphs_are_off_by_default() -> None:
+    """Measurement A found no M at which the graphs beat brute force (ADR-0028)."""
+    from smartann.index.storage import cluster_kind
+
+    cfg = IndexBuildConfig(dataset="x")
+    assert cluster_kind(1_000_000, cfg.min_graph_size) == CLUSTER_FLAT

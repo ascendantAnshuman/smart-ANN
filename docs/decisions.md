@@ -1072,3 +1072,232 @@ and cost roughly 4x the wall-clock plus 263 MB of extra disk on SIFT. Two
 independent algorithms agreeing that precisely is strong evidence both are
 exhaustive within each cluster, which is exactly what `ef * M >= 1024` against a
 mean cluster of 500 predicts.
+
+---
+
+## ADR-0026 (amendment) — the reconstruction claim is now measured, not inferred
+
+**Status.** Confirms ADR-0026 by direct measurement. Adds a caveat the original
+did not have.
+
+**What was wrong with the original argument.** ADR-0026 concluded "reconstruction,
+not I/O" from an inference: the page cache is warm, therefore the read is cheap,
+therefore the cost must be CPU. Sound reasoning, but the whole cache decision
+rested on it, so it needed testing rather than deriving.
+
+**Method.** Load one representative cluster file 60 times in a single process,
+timing each. By load 50 the page cache is certainly warm, so any cost remaining
+is not I/O. Separately, read the same file with no parsing at all, which
+isolates the byte-read component.
+
+```
+sift1m   cluster 98,  466 vectors, 361 KiB
+  raw file read (warm)  0.064 ms =  1.2% of load time
+  reconstruction        5.345 ms = 98.8%
+
+nytimes  cluster 359, 472 vectors, 601 KiB
+  raw file read (warm)  0.438 ms =  5.2% of load time
+  reconstruction        7.979 ms = 94.8%
+```
+
+**Confirmed.** Reading the bytes is 1-5% of the cost; 95-99% is
+`hnswlib.load_index` rebuilding the graph structure in memory. The cache
+decision's premise holds: a cache would remove the great majority of the ~84% of
+query time that cluster loading consumes.
+
+**Eviction is not achievable on this platform, stated plainly.** win32 exposes
+no page-cache eviction primitive -- no `posix_fadvise`, and `EmptyWorkingSet`
+requires elevation. These numbers are **warm-only**. What they establish: the
+cost that remains when the file is certainly cached, which is a floor. What they
+do not establish: what a genuinely cold first touch adds on this SSD, or on a
+phone's flash, where the read component will be far larger relative to CPU.
+Phase 3.5 supplies the cold number and it can only move the ratio toward I/O,
+never away from it -- so "reconstruction dominates" is safe as a lower bound on
+this machine and must be re-checked on the phone.
+
+**An anomaly worth recording rather than hiding.** The per-load absolute here
+(5.4-8.4 ms) is higher than the ~1.9 ms derived from `t_cluster_load` in the
+search loop, load 1 is *faster* than the steady state (ratios 0.79x and 0.40x),
+and NYTimes is noisy (IQR 6.656 against a median of 8.417). That pattern is the
+opposite of a cold-cache effect and looks like heap fragmentation accumulating
+across repeated allocate-and-free cycles of graph structures. It means the
+absolute per-load figure depends on allocator state and should not be quoted as
+a constant. The read-versus-reconstruct *ratio* is unaffected by it, and the
+ratio is what the decision turns on.
+
+---
+
+## ADR-0028 — The per-cluster HNSW graphs are removed; no M makes them pay
+
+**Status.** Accepted, by a pre-committed rule applied to Measurement A.
+
+**The rule, fixed before the data.** Keep the graphs if some `M` gives EcoVector
+a lower median wall-clock than `ivf_disk` at matched recall (within 0.005) on
+either dataset; drop them if no `M` wins.
+
+**Measurement A.** `nc`, `ef_construction` and seed held fixed; `M` swept over
+{4, 8, 16, 32}; `ivf_disk` included as the M-to-zero limit.
+
+```
+sift1m      M   nprobe/ef   recall      dist   ms med     load   search   diskMB
+            4      64/512   0.9927    35,602  544.293  439.606   22.309    550.1
+            8      64/512   0.9953    36,089  437.816  352.524   22.583    579.2
+           16      64/512   0.9953    37,066  443.281  356.393   23.350    640.1
+           32      64/512   0.9953    37,066  131.654  110.408    6.679    762.1
+      ivf(M->0)    64/512   0.9953    37,066   43.351   31.946    5.030    499.4
+
+nytimes    32      64/512   0.8680    40,441  528.816  432.862   29.021    362.8
+      ivf(M->0)    64/512   0.8680    40,435  222.119  182.886   15.604    286.6
+```
+
+**No `M` wins anywhere.** At every matched-recall pair on both datasets,
+`ivf_disk` is faster. Lowering `M` does make the graph do partial rather than
+exhaustive work -- distance computations fall from 37,066 to 35,602 on SIFT --
+but recall falls with it (0.9953 to 0.9927) and wall-clock gets *worse*, not
+better. The graphs also cost 263 MB of extra disk on SIFT.
+
+**An order confound, checked rather than assumed.** In Measurement A the
+variants got faster with position and `ivf_disk` ran last, and a 4x
+discontinuity between M=16 and M=32 is not a plausible property of graph degree.
+A control re-ran the two variants with `ivf_disk` **first**, interleaved over
+four rounds in one process: 51.5 / 53.1 / 51.3 ms against 194.6 / 186.6 / 203.0
+ms, a **3.80x** ratio matching the ~4x from an earlier independent run. The
+advantage is real; the M-to-M absolute times in Measurement A are drift-affected
+and should not be quoted.
+
+**The confound the ruling asked about: it won on load, not on search.** At SIFT
+`nprobe=64`, `ivf_disk` saves 78.5 ms of cluster load and only 1.7 ms of search.
+So the honest statement is **"`.npy` maps faster than hnswlib graphs
+reconstruct"**, which is a finding about serialisation, not about search
+algorithms. "Sparser graphs search faster" would have been a finding about the
+algorithm and is *not* what was observed.
+
+**Decision.** `min_graph_size` defaults to a value above any cluster size, so
+every cluster is flat. The graph path is retained in the code and reachable by
+lowering `min_graph_size`, which keeps the ablation available -- this comparison
+is itself a result the paper should carry.
+
+**Reframed around MobileRAG's own cost model, which predicts this result.**
+
+Dropping the per-cluster graphs does not produce a generic IVF index. It
+produces **IVF-HNSW**, a baseline the paper defines and positions itself
+against. The paper's memory expressions differ by exactly one term:
+
+```
+IVF-HNSW    4Nc(d + M'/(1-p0)) + 8N + 4d
+EcoVector   4Nc(d + M'/(1-p0)) + 8N + 4(d + M'/(1-p0))
+```
+
+That last term is one cluster's graph. Remove it and EcoVector *is* IVF-HNSW.
+Figure 9 puts IVF-HNSW at 2.0 mJ against EcoVector's 1.2 mJ on SIFT, a 40%
+power gap attributed to that term.
+
+**And the paper states the condition under which the graph pays.** Its
+search-time models are
+
+```
+IVF-HNSW    ef_c * M' + n_P * (N/Nc)
+EcoVector   ef_c * M' + n_P * ef_L * M'
+```
+
+so EcoVector beats IVF-HNSW **iff `ef_L * M' < N/Nc`** -- the per-cluster graph
+is worth walking only when walking it costs less than scanning the cluster.
+Against our builds:
+
+| dataset | N/Nc | ef_L * M' | condition |
+|---|---|---|---|
+| sift1m  | 1,000,000 / 2000 = 500 | >= 32 x 32 = 1024 | **violated by 2.0x** |
+| nytimes | 289,761 / 538 = 539    | >= 32 x 32 = 1024 | **violated by 1.9x** |
+
+**MobileRAG's own arithmetic predicts our measurement.** This is not a
+contradiction of the paper. We built outside the regime where EcoVector's
+distinguishing component can pay for itself, and inside that regime EcoVector
+reduces to the baseline it is measured against.
+
+The finding is therefore not "the graphs did not help for us" but the sharper:
+*the default configuration -- `Nc = sqrt(N)` on NYTimes, `Nc = 2000` on SIFT,
+with M=32 -- sits outside the condition `ef_L * M' < N/Nc` that EcoVector's own
+search-time model requires, so its distinguishing component cannot pay for
+itself there and the index degenerates to IVF-HNSW.*
+
+**Instantiation caveat, now narrower.** The recall half is
+implementation-independent: two different algorithms agreeing to four decimal
+places across seven configurations and two datasets is evidence about cluster
+sizes, not about a library. The wall-clock half is hnswlib-specific -- the 4x is
+`.npy` mapping against hnswlib deserialisation, and a different serialisation
+could change it. The *condition* is the paper's, not ours, and holds regardless
+of either.
+
+## ADR-0029 — No cluster cache; memory-map the flat clusters instead
+
+**Status.** Accepted.
+
+**Not because the benefit is small.** Measurement B (ADR-0026 amendment) shows
+95-99% of load time is reconstruction, so a cache would remove most of the ~84%
+of query time that loading consumes. The benefit is large. A cache is the wrong
+instrument for it.
+
+**Why a cache is wrong here.** It makes query cost depend on cache contents,
+which depend on query locality and history. Phase 3's cost model would then be
+fitting a function of the query *sequence* rather than of the query, and every
+latency and energy prediction would be conditional on a warm-up state the
+controller cannot observe. The dominant cost term would change from
+`n_cluster_loads` to `n_cache_misses` -- different random variables with
+different distributions -- so a model fitted on one is not merely imprecise for
+the other, it is invalid.
+
+**mmap instead.** With the graphs gone (ADR-0028), flat clusters are stored as
+two plain `.npy` files -- vectors and ids -- rather than one `.npz`, because
+`np.load` can memory-map a `.npy` and cannot map inside a zip archive. Mapping
+gives zero-copy access with no reconstruction at all: most of what the cache
+would have bought, while keeping cost a function of bytes touched rather than of
+history, and handing eviction policy to the OS, which is better at it and is not
+our variable.
+
+**A footprint consequence worth stating.** Mapped pages are file-backed, so they
+do not count toward anonymous RSS. Check 5 already reports anonymous separately
+from total RSS, so the measurement infrastructure needed no change. A
+file-backed footprint is arguably *more* faithful to a phone than an anonymous
+one, since the OS can evict it under memory pressure -- which is precisely the
+pressure this project exists to adapt to.
+
+**If the graphs ever come back**, mmap is unavailable for them (hnswlib
+deserialises into its own structures) and this decision should be reopened with
+the M-sweep numbers in hand.
+
+---
+
+## ADR-0030 — Standing rule: interleave timing comparisons, and report dispersion
+
+**Status.** Accepted. Standing rule, alongside the test-isolation rule
+(ADR-0015).
+
+**A wall-clock comparison between two variants must interleave them within a
+single process, alternating on every repeat, and must report a dispersion
+estimate beside every median.**
+
+**Why.** A blocked sweep -- all of variant A, then all of variant B -- measures
+the machine's drift as much as it measures the code. This project has now hit
+that twice:
+
+1. Single-shot timings with no warmup reported 27.076 ms and 8.589 ms for two
+   configurations doing provably identical work (10,724 modelled comparisons
+   each). A 3x spread at zero work difference.
+2. A blocked M sweep produced a 4x discontinuity between M=16 and M=32 that is
+   not a plausible property of graph degree, with the fastest variant happening
+   to run last. An interleaved control put the true ratio at 3.80x.
+
+In both cases the number looked like a result and was partly an artifact of
+position in the run. Drift is not noise that averages out: it is monotone within
+a run, so it biases whichever variant runs late.
+
+**What it does not fix.** Interleaving equalises drift between variants; it does
+not make absolute timings portable. Absolutes still depend on allocator state,
+thermal headroom and page-cache contents, which is why the dispersion estimate
+is mandatory rather than decorative -- an IQR comparable to the median is a
+signal not to quote the median.
+
+**Applied.** `_sweep_cost_recall` in `scripts/phase2_acceptance.py` interleaves
+every variant within each config. The regime test does the same. Any future
+comparison that cannot interleave -- because the variants are separate processes,
+say -- must say so and must carry a control.

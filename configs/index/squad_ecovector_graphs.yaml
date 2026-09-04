@@ -1,0 +1,9 @@
+# Ablation: restores the per-cluster HNSW graphs that ADR-0028 removed by
+# default. Kept reachable because the comparison is itself a result.
+dataset: squad
+nc: auto
+m: 32
+ef_construction: 200
+min_graph_size: 32
+seed: 42
+index_variant: ecovector

@@ -84,3 +84,34 @@ data is fitting the threshold to the result.
   invalid. Fitting first and caching later would silently invalidate every
   latency and energy prediction Phase 3 produces, and the failure would surface
   as unexplained controller underperformance in Phase 6.
+
+
+## Consequence for Phase 6: the action space is smaller than assumed
+
+Phase 6 should be told this now rather than discovering it while tuning a
+controller.
+
+SMART-ANN's premise is a controller that adapts retrieval effort per query. The
+`AnnConfig` knobs are `nprobe`, `ef_centroid`, `ef_list` and `per_cluster_k`.
+Phase 2 measured two of them to be inert:
+
+- **`ef_centroid` is free** (ADR-0025). The centroid graph matches brute force
+  exactly at every `nprobe` on both datasets, gap 0.0000. It has no error to
+  trade against, so raising or lowering it buys and costs nothing measurable.
+- **`ef_list` is inert once the in-cluster search is exhaustive** (ADR-0024).
+  With `ef * M >= 1024` against a mean cluster of ~500, every per-cluster search
+  already examines everything. The check 4 sweep shows it directly: `nprobe=16,
+  ef=64` and `nprobe=16, ef=128` give 0.8773 and 0.8780 -- a 2x change in the
+  knob moving recall by 0.0007.
+
+That leaves **`nprobe` as the effort knob the controller will actually turn**,
+and check 2 confirms it spans a wide range on its own (recall 0.3033 to 0.9537,
+2.1 to 64.3 ms). If the per-cluster graphs are dropped, the action space is
+`nprobe` alone -- a one-dimensional controller, not the multi-dimensional one
+Phase 6's design assumes.
+
+This is not necessarily bad. A one-dimensional action space makes the bandit
+easier to learn, the safety shield easier to reason about, and the Pareto front
+easier to characterise. But it changes what C1 ("runtime-adaptive ANN
+parameters", plural) can honestly claim, and it should be settled before Phase 6
+builds a profile table over dimensions that do not move the outcome.

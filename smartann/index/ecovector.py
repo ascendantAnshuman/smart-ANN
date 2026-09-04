@@ -196,17 +196,20 @@ class EcoVectorIndex:
 
             t0 = time.perf_counter()
             if kind == CLUSTER_FLAT:
-                with np.load(path) as z:
-                    ids_c = np.asarray(z["ids"], dtype=np.int64)
-                    vecs = np.asarray(z["vectors"], dtype=np.float32)
+                # Memory-mapped: zero-copy, no reconstruction, and the pages are
+                # file-backed so the OS can evict them under pressure. That is
+                # arguably a more faithful footprint on a phone than anonymous
+                # memory, and it is why no cluster cache was added (ADR-0029).
+                vecs = np.load(path, mmap_mode="r")
+                ids_c = np.load(self.paths.cluster_ids_file(int(cid)), mmap_mode="r")
                 res.t_cluster_load += (time.perf_counter() - t0) * 1000.0
 
                 t1 = time.perf_counter()
-                d = _brute_force(q[0], vecs, self.meta.space)
+                d = _brute_force(q[0], np.asarray(vecs, dtype=np.float32), self.meta.space)
                 take = min(cfg.per_cluster_k, d.size)
                 sel = np.argpartition(d, take - 1)[:take] if take < d.size else np.arange(d.size)
                 sel = sel[np.argsort(d[sel], kind="stable")]
-                got_i, got_d = ids_c[sel], d[sel]
+                got_i, got_d = np.asarray(ids_c, dtype=np.int64)[sel], d[sel]
                 res.t_cluster_search += (time.perf_counter() - t1) * 1000.0
                 res.n_flat_clusters_scanned += 1
                 res.n_dist_exact += size  # brute force: exactly this many, counted
@@ -234,6 +237,8 @@ class EcoVectorIndex:
             res.per_cluster_found.append(int(got_i.size))
             res.n_cluster_loads += 1
             res.bytes_read += path.stat().st_size
+            if kind == CLUSTER_FLAT:
+                res.bytes_read += self.paths.cluster_ids_file(int(cid)).stat().st_size
 
             mem = self._proc.memory_info()
             anon_peak = max(anon_peak, _anon_mb(mem))

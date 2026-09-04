@@ -213,7 +213,8 @@ def build_ecovector(
             # Too few members for a graph to help, and hnswlib raises outright
             # when k exceeds the element count (test_hnswlib_contract). Brute
             # force over a handful of vectors is exact and faster anyway.
-            np.savez(path, ids=ids.astype(np.int32), vectors=vecs)
+            np.save(path, vecs)
+            np.save(out.cluster_ids_file(cid), ids.astype(np.int32))
         else:
             g = hnswlib.Index(space=space, dim=dim)
             g.init_index(
