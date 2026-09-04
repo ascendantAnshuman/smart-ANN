@@ -464,7 +464,22 @@ def main() -> int:
     args = ap.parse_args()
 
     paths = resolve_paths()
-    runs_root = Path(args.runs) if args.runs else paths.results_root / "E_DEMO"
+    # The experiment writes E_DEMO_<mode>; "E_DEMO" alone was left behind when
+    # target-step mode was added, so the documented reproduce command pointed at
+    # a directory nothing creates. Pick the newest of whatever exists.
+    if args.runs:
+        runs_root = Path(args.runs)
+    else:
+        candidates = sorted(paths.results_root.glob("E_DEMO_*"), key=lambda d: d.stat().st_mtime)
+        if not candidates:
+            print(
+                f"no E_DEMO_* run directories under {paths.results_root}; "
+                f"run scripts/experiment_contention.py first",
+                file=sys.stderr,
+            )
+            return 1
+        runs_root = candidates[-1]
+        print(f"using most recent run: {runs_root}", flush=True)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 

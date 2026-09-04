@@ -71,12 +71,20 @@ class AimdPolicy(Policy):
         self.scr = scr
         self.effort = cfg.effort_init
         self._seen = 0
-        self._last_action_t = 0.0
+        # None, not 0.0: 'no action yet' is not 'acted at time zero'. With 0.0 the
+        # first action cannot fire until the clock exceeds one period, which is
+        # invisible under time.time() (~1.8e9) and silently disables the
+        # controller under any relative clock.
+        self._last_action_t: float | None = None
 
     def reset(self) -> None:
         self.effort = self.cfg.effort_init
         self._seen = 0
-        self._last_action_t = 0.0
+        # None, not 0.0: 'no action yet' is not 'acted at time zero'. With 0.0 the
+        # first action cannot fire until the clock exceeds one period, which is
+        # invisible under time.time() (~1.8e9) and silently disables the
+        # controller under any relative clock.
+        self._last_action_t = None
 
     def _nprobe(self) -> int:
         """Map effort in [0,1] onto the nprobe range, monotonically.
@@ -101,7 +109,9 @@ class AimdPolicy(Policy):
         warm = self._seen > self.cfg.warmup_queries and state.history.queries_in_window > 0
         # Act no faster than the feedback arrives. With control_period_s = 0 this
         # is the original once-per-query loop.
-        due = (now - self._last_action_t) >= self.cfg.control_period_s
+        due = (
+            self._last_action_t is None or (now - self._last_action_t) >= self.cfg.control_period_s
+        )
         if warm and due:
             if p95 > target:
                 self.effort *= self.cfg.multiplicative_decrease
