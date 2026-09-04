@@ -1676,3 +1676,81 @@ unmeasurable until a generator exists.
    little latency for fewer tokens; it trades a great deal of latency for ~29%
    fewer tokens. Whether that trade is ever worth it depends on generation cost,
    which Phase 7 would supply and cannot.
+
+---
+
+## ADR-0036 — The profile table is measurements, and a blocked sweep corrupted it
+
+**Status.** Accepted. Phase 6's remaining deliverable, plus the fourth occasion
+this project has been bitten by a blocked measurement.
+
+**Why a table and not the cost model.** Phase 3's latency model holds at 14.75%
+MAPE inside its fitted regime and fails at 35.87% outside it because `cpu_util`
+is censored (ADR-0033). A budget policy that *predicted* latency from it would
+be most confident exactly where it is most wrong -- under load, which is the
+condition this project exists to handle. So `ProfileTable` records what each
+effort level actually cost and returned when it ran, and carries the conditions
+of measurement so quiet-machine numbers cannot be silently applied to a loaded
+one.
+
+**The sweep was blocked, and it inverted the table.** The first attempt ran all
+of `nprobe=1`, then all of `nprobe=2`, and so on. The result:
+
+```
+ nprobe    p50 ms    p95 ms   recall        (BLOCKED -- WRONG)
+      1    38.793    54.524   0.3075
+      4     4.807    51.462   0.6235
+      8     8.172    39.320   0.7623
+```
+
+Latency *fell* as effort rose, because the first levels paid the cold-start and
+the later ones did not. The derived Pareto front then declared **nprobe 1, 2, 4
+and 8 "dominated and never worth choosing"** -- exactly the cheap levels a
+controller must reach for under pressure. A budget policy reading that table
+would have been structurally unable to back off, and the failure would have
+looked like a policy bug rather than a corrupted input.
+
+**Interleaved and warmed, the table is monotone in both columns:**
+
+```
+ nprobe    p50 ms    p95 ms   recall        n
+      1     1.171     1.562   0.3189    1,990
+      8     7.921     9.461   0.7849    1,990
+     16    15.811    18.295   0.8906    1,990
+     32    31.421    35.611   0.9586    1,989
+pareto front: every level. dominated: none.
+```
+
+Every level on the front is the correct answer for a well-behaved index: each
+buys recall for latency and none is strictly worse than another.
+
+**ADR-0030 already said this** -- "a wall-clock comparison must interleave" --
+and it was written after the same mistake in a different harness. The rule was
+recorded and then not applied to a new sweep. The lesson is that a rule stated
+once in a document does not propagate to code written later; `profile()` now
+carries the reason in its own docstring, where someone writing the next sweep
+will see it.
+
+**Policy comparison, one declared budget, fixed from the table before any policy
+ran:**
+
+```
+budget = p95 of the median swept level (nprobe=12) = 14.01 ms
+
+  static   p95 14.20 ms   viol 6.0%   recall 0.8480   nprobe 12
+  aimd     p95 13.44 ms   viol 4.3%   recall 0.8103   nprobe 10
+  budget   p95  9.51 ms   viol 0.2%   recall 0.7797   nprobe  8
+```
+
+**The budget policy honours its declared latency budget at 0.2% violation, 30x
+better than static, for 0.068 recall.** It is deliberately conservative -- 0.9
+headroom means it selects the level whose measured p95 fits with margin, because
+the table was measured on a machine in one state and aiming at the budget
+exactly would put half the error on the wrong side of it.
+
+**C4 is half-delivered, and the half is named.** Latency-budget-constrained
+retrieval works and is measured. Energy-budget-constrained retrieval has the
+machinery and no measurement: `BudgetPolicy.honours_energy_budget()` returns
+**False** and every run manifest records it, because acting on a modelled energy
+as if measured is the precise failure the capability gate exists to prevent.
+Phase 3.5 supplies the measurement that would complete it.
