@@ -18,6 +18,7 @@ from smartann.data.readers import duplicate_report
 from smartann.index.storage import (
     CLUSTER_EMPTY,
     CLUSTER_FLAT,
+    CLUSTER_GRAPH,
     IndexMeta,
     IndexPaths,
     cluster_kind,
@@ -267,6 +268,7 @@ def build_ecovector(
         smallest_nonempty_cluster=int(nonempty.min()) if nonempty.size else 0,
         n_duplicate_centroids=int(part.n_duplicate_centroids),
         bytes_on_disk=_dir_bytes(out.root),
+        has_per_cluster_graphs=kinds.count(CLUSTER_GRAPH) > 0,
         library_versions=library_versions(),
     )
     meta.to_json(out.meta)

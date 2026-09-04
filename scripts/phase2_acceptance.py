@@ -350,15 +350,23 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
     only as good as that shared model. Wall-clock, reported separately below, is
     the measured quantity.
     """
+    # The verdict is flat-clusters vs per-cluster GRAPHS. Since ADR-0028 made
+    # flat the default, "ecovector" and "ivf_disk" build byte-identical indexes,
+    # so comparing them would compare an index to itself -- a check that cannot
+    # fail. The graphs live in *_ecovector_graphs.yaml, which is the ablation.
     eco_p = index_root(dataset, "ecovector")
     flat_p = index_root(dataset, "flat_hnsw")
-    ivf_p = index_root(dataset, "ivf_disk")
-    if eco_p is None or flat_p is None or ivf_p is None:
-        report(f"4. work-efficiency vs ivf_disk ({dataset})", False, "all three indexes required")
+    graphs_p = index_root(dataset, "ecovector_graphs")
+    if eco_p is None or flat_p is None or graphs_p is None:
+        report(
+            f"4. work-efficiency vs per-cluster graphs ({dataset})",
+            False,
+            "needs ecovector, ecovector_graphs and flat_hnsw built",
+        )
         return
     eco = EcoVectorIndex.open(eco_p.root)
     flat = FlatHnswIndex.open(flat_p.root)
-    ivf = EcoVectorIndex.open(ivf_p.root)
+    ivf = EcoVectorIndex.open(graphs_p.root)
     _, queries, gi, gd = load_all(dataset)
     nq = min(300, queries.shape[0])
     q, gi, gd = queries[:nq], gi[:nq], gd[:nq]
@@ -375,8 +383,10 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
         AnnConfig(nprobe=1, ef_centroid=64, ef_list=ef, k=10, per_cluster_k=pck)
         for ef in (16, 32, 64, 128, 256, 512, 1024)
     ]
-    swept = _sweep_cost_recall({"ecovector": eco, "ivf_disk": ivf}, q, gi, gd, eco_grid)
-    eco_s, ivf_s = swept["ecovector"], swept["ivf_disk"]
+    swept = _sweep_cost_recall(
+        {"flat clusters (default)": eco, "per-cluster graphs": ivf}, q, gi, gd, eco_grid
+    )
+    eco_s, ivf_s = swept["flat clusters (default)"], swept["per-cluster graphs"]
     flat_s = _sweep_cost_recall({"flat_hnsw": flat}, q, gi, gd, flat_grid)["flat_hnsw"]
 
     def cost_for(rows: list[tuple[str, float, float, float, float]]) -> tuple[float, float, str]:
@@ -389,9 +399,9 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
     ivf_cost, ivf_ms, ivf_lbl = cost_for(ivf_s)
     flat_cost, flat_ms, flat_lbl = cost_for(flat_s)
 
-    # The verdict is EcoVector against ivf_disk, which is the same partition,
-    # the same files and the same load path with brute force instead of graphs.
-    # That isolates exactly what the per-cluster graphs buy.
+    # Flat clusters must reach the target for no more modelled work than the
+    # graphs need. Same partition, same files, same load path -- the only
+    # difference is the storage format, so this isolates what the graphs buy.
     ok = np.isfinite(eco_cost) and np.isfinite(ivf_cost) and eco_cost <= ivf_cost
 
     def table(name: str, rows: list[tuple[str, float, float, float, float]]) -> list[str]:
@@ -405,14 +415,14 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
         ]
         return [*out, ""]
 
-    lines = table("ecovector", eco_s) + table("ivf_disk (same partition, no graphs)", ivf_s)
+    lines = table("flat clusters (default)", eco_s) + table("per-cluster graphs (ablation)", ivf_s)
     lines += [
-        f"VERDICT -- ecovector vs ivf_disk: recall>={target:.2f} at {eco_cost:,.0f} modelled "
+        f"VERDICT -- flat vs graphs: recall>={target:.2f} at {eco_cost:,.0f} modelled "
         f"distance computations ({eco_lbl}) vs {ivf_cost:,.0f} ({ivf_lbl})",
         f"  wall-clock at that point (median of {5} repeats after warmup): "
         f"{eco_ms:.3f} ms vs {ivf_ms:.3f} ms per query",
-        "  Same partition, same files, same load path -- the only difference is per-cluster",
-        "  graphs versus brute force, so this is a claim the index wins or loses on its merits.",
+        "  Same partition, same files, same load path -- the only difference is the storage",
+        "  format, so this is a claim the design wins or loses on its merits.",
         "  n_distance_computations is exact for flat clusters and a CAPPED MODEL for graph",
         "  traversal (min(ef*M, cluster size)), so the two sides share one cost model.",
         "",
@@ -427,7 +437,7 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
         "  check 5 -- read the two together, never this table alone.",
         compare_note(),
     ]
-    report(f"4. work-efficiency vs ivf_disk ({dataset})", ok, NL.join(lines))
+    report(f"4. work-efficiency vs per-cluster graphs ({dataset})", ok, NL.join(lines))
 
 
 def check5_resident_footprint(dataset: str) -> None:

@@ -157,6 +157,10 @@ class IndexMeta:
     smallest_nonempty_cluster: int
     n_duplicate_centroids: int
     bytes_on_disk: int
+    # EcoVector's defining component. False means this artifact is IVF-HNSW with
+    # mmap'd flat clusters, NOT EcoVector -- the name on index_variant is kept
+    # for continuity but does not describe what was built (ADR-0028).
+    has_per_cluster_graphs: bool = False
     library_versions: dict[str, str] = field(default_factory=dict)
 
     def to_json(self, path: Path) -> None:

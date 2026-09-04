@@ -153,6 +153,7 @@ def build_flat_hnsw(
         smallest_nonempty_cluster=int(n_base),
         n_duplicate_centroids=0,
         bytes_on_disk=out.centroid_graph.stat().st_size,
+        has_per_cluster_graphs=False,
         library_versions=library_versions(),
     )
     meta.to_json(out.meta)

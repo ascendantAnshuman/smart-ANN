@@ -42,13 +42,20 @@ from smartann.types import AnnConfig, Constraints, ScrConfig
 SCR_OFF = ScrConfig(3, 1, 1, 2, 0.0, enabled=False)
 
 
-def _burn(stop: mp.Event) -> None:  # type: ignore[name-defined]
-    """Spin until told to stop. Deliberately trivial: the point is CPU demand."""
-    x = 0.0
+def _burn(stop: mp.Event, mb: int = 256) -> None:  # type: ignore[name-defined]
+    """Stream through a large array until told to stop.
+
+    Deliberately NOT a spin loop. After ADR-0028 the query path is a brute-force
+    scan over memory-mapped flat arrays, which is memory-bandwidth bound; a pure
+    float-add loop competes for ALU and would barely touch it. Streaming through
+    256 MB per worker contends for the resource the queries actually use, and is
+    closer to what a loaded phone looks like.
+    """
+    buf = np.empty(mb * 1024 * 1024 // 8, dtype=np.float64)
+    buf[:] = 1.0
     while not stop.is_set():
-        for _ in range(100_000):
-            x += 1.000000001
-    _ = x
+        buf *= 1.0000001
+        _ = float(buf.sum())
 
 
 class Burners:
