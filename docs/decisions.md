@@ -717,3 +717,203 @@ a 0.59% inertia spread was not separately confirmed to be a negligible recall
 difference. It is small relative to the recall effects Phase 2 measures (the M
 sweep moved recall by 3-6 points), so the risk of it mattering is low, and
 acceptance check 1b measures real recall on the artifact these settings produce.
+
+---
+
+## ADR-0023 — The distance-computation model is capped at containment
+
+**Status.** Accepted. Bug fix, not a tune.
+
+**Context.** `n_dist_modeled` estimated graph traversal as `ef * M` with no
+upper bound. EcoVector's clusters are small: SIFT's mean cluster holds 500
+vectors while `ef=512, M=32` claims 16,384 comparisons — 33x more than the
+cluster contains. A graph of `n` elements cannot produce more than `n` distinct
+distance computations, so the figure was not an approximation but a wrong number.
+
+**Measured against the true containment ceiling** (total membership of the
+probed clusters, the hard maximum):
+
+| config | uncapped model | containment ceiling | overstatement |
+|---|---|---|---|
+| sift nprobe=8, ef=64 | 20,480 | 4,641 | 4.4x |
+| sift nprobe=32, ef=256 | 266,240 | 18,124 | 14.7x |
+| sift nprobe=64, ef=512 | 1,052,672 | 35,709 | 29.5x |
+
+**Decision.** Per graph cluster, `min(max(ef_list, per_cluster_k) * M, size)`;
+for the centroid phase, `min(max(ef_centroid, nprobe) * M, n_live)`.
+
+**Still a model, still an upper bound.** HNSW revisits nodes, so the true count
+is lower again. The cap removes an error of up to 29x; it does not make the
+number a measurement. Phase 3 regresses its cost model on this field, which is
+why it had to be right *before* Phase 3 rather than discovered during it.
+
+---
+
+## ADR-0024 — Check 4 is posed against ivf_disk; and the per-cluster graphs buy nothing here
+
+**Status.** Accepted, with a finding that was not anticipated.
+
+**Context.** Check 4 originally required EcoVector to reach a recall target in
+fewer distance computations than flat HNSW. That asks an IVF index to win the
+exact thing it deliberately trades away: flat HNSW holds the whole corpus
+resident, EcoVector spends extra comparisons to bound its footprint. The
+criterion was ill-posed, not merely unflattering.
+
+**Decision.** The verdict is EcoVector against **ivf_disk** — the same
+partition, the same files, the same load path, brute force instead of graphs —
+which isolates precisely what the per-cluster graphs contribute and is a claim
+the index can win or lose on its merits. flat_hnsw is retained as a reported
+measurement carrying no verdict, printed beside the check 5 footprint numbers it
+is trading against.
+
+**The finding.** With the model capped, the two variants come out *identical*:
+
+```
+sift1m   nprobe=32,ef=256   ecovector 19,323 comps / 0.9537 / 72.20 ms
+                            ivf_disk  19,323 comps / 0.9537 / 30.96 ms
+         nprobe=64,ef=512   ecovector 36,323 comps / 0.9907 / 144.46 ms
+                            ivf_disk  36,323 comps / 0.9907 /  39.35 ms
+```
+
+Same recall to four decimals, same modelled work, and **ivf_disk is 2.3x-3.7x
+faster in wall-clock**. The per-cluster HNSW graphs contribute nothing at these
+cluster sizes and cost real time.
+
+**Why, and when it would change.** With `M=32` and `per_cluster_k=32`, the
+effective `ef` is at least 32, so `ef * M >= 1024` — already above SIFT's mean
+cluster of 500 and NYTimes' 539. Every per-cluster graph search is therefore
+*exhaustive anyway*, and the graph is pure overhead: extra bytes on disk (762 MB
+versus 499 MB on SIFT), extra reconstruction time per query, zero recall.
+
+The graphs only earn their place when `ef * M < cluster size`, i.e. with
+substantially larger clusters (lower `nc`) or smaller `M`. At `nc=128` on
+NYTimes the mean cluster is 2,264 and the graphs would do real work. This is
+the same axis as ADR-0025's ceiling question, which is why the two should be
+decided together rather than separately.
+
+**Caveat on the wall-clock column.** ivf_disk's per-query times in this run are
+noisy and non-monotonic (30.1 ms at nprobe=2, 8.6 ms at nprobe=16), consistent
+with first-touch page-cache effects. The distance-computation comparison is
+solid; the ivf_disk timings should be re-measured before being quoted.
+
+---
+
+## ADR-0025 — NYTimes' recall shortfall is cluster-miss; ef_centroid is free
+
+**Status.** Measurement recorded. No default changed.
+
+**Context.** Acceptance check 1b measured 0.8751 score-equality recall on
+NYTimes at `nprobe=64, ef_list=512`, against a 0.95 threshold. Before arguing
+with anything, the shortfall had to be split into cluster-miss error (the true
+neighbours were never in a probed cluster) and in-cluster error (they were
+there and the search missed them).
+
+**Method.** Pure numpy over `assignments` and the ground-truth ids, no search.
+For each query, map its true top-10 to their clusters and count how many fall in
+the probed set. That is the maximum recall@10 reachable at that `nprobe` with a
+*perfect* in-cluster search. Computed twice: against the exact nearest
+centroids, and against what `probe()` actually returns.
+
+```
+ nytimes  nc=538, mean cluster 539        sift1m  nc=2000, mean cluster 500
+ nprobe   exact    probe      gap         nprobe   exact    probe      gap
+      8  0.7151   0.7151   0.0000              8  0.7672   0.7672   0.0000
+     16  0.7649   0.7649   0.0000             16  0.8779   0.8779   0.0000
+     32  0.8158   0.8158   0.0000             32  0.9515   0.9515   0.0000
+     64  0.8709   0.8710  -0.0001             64  0.9879   0.9879   0.0000
+    128  0.9232   0.9232   0.0000            128  0.9977   0.9977   0.0000
+    256  0.9715   0.9715   0.0000            256  1.0000   1.0000   0.0000
+```
+
+**Finding 1: the shortfall is almost entirely cluster-miss.**
+
+| | NYTimes | SIFT |
+|---|---|---|
+| ceiling at nprobe=64 | 0.8709 | 0.9879 |
+| measured (index-overlap) | 0.8603 | 0.9871 |
+| **in-cluster loss** | **0.0106** | **0.0008** |
+| cluster-miss loss | 0.1291 | 0.0121 |
+
+In-cluster search accounts for 1.1 points of a 13.9-point shortfall. `ef_list=512`
+on a 539-element cluster is exhaustive, so there is essentially nothing left for
+the in-cluster search to recover. Tuning `ef_list` or `M` cannot fix this.
+
+**Finding 2: the centroid graph is exact, so `ef_centroid` is not a lever.**
+The exact-versus-probe gap is `0.0000` at every `nprobe` on both datasets; the
+single `-0.0001` is a centroid-distance tie broken differently, where the graph
+*beat* brute force. At `ef_centroid=128` the centroid search costs no recall at
+all. Direct Phase 6 consequence: `ef_centroid` has no error to trade against and
+should be pinned rather than carried in the controller's action space. It also
+retires the check 8 contingency — the probe is cheap *and* accurate.
+
+**Finding 3: lower `nc` raises the ceiling, and the price is the exact resource
+under test.** Measurement only; nothing built, no default changed.
+
+```
+    nc    mean     max  peakMB     np=8    np=16    np=32    np=64   np=128
+    64    4528   10559   12.89   0.7675   0.8660   0.9547   1.0000        -
+   128    2264    6220    7.59   0.7444   0.8173   0.8897   0.9594   1.0000
+   256    1132    4278    5.22   0.7193   0.7850   0.8456   0.9102   0.9673
+   538     539    2342    2.86   0.7151   0.7649   0.8158   0.8709   0.9232
+```
+
+`nc=128` reaches a 0.9594 ceiling at `nprobe=64` for a `cluster_peak` of 7.59 MB
+against 2.86 MB — total predicted resident rising from 4.62 MB to about 9.3 MB,
+still inside MobileRAG's own 3.53-9.67 MB range. It is also *cheaper* in
+wall-clock, because per-query cost is dominated by the number of cluster loads
+(ADR-0026) and `nc=128` needs 64 loads where `nc=538` would need roughly 200.
+
+Note this interacts with ADR-0024: at `nc=128` the mean cluster is 2,264, above
+`ef * M = 1024`, so the per-cluster graphs would begin doing real work instead of
+being exhaustive overhead. The `nc` question and the "do the graphs earn their
+place" question have the same answer axis and should be decided together.
+
+**Open.** The threshold stands at 0.95 and `nc` stays at `auto`. Three honest
+options — raise `nprobe`, lower `nc`, or revise the threshold with a recorded
+reason — and the measurement above is what a decision should be made against.
+
+---
+
+## ADR-0026 — 83% of per-query time is graph reconstruction, not I/O
+
+**Status.** Finding recorded. Deliberately not fixed.
+
+**Measurement.** Per-query breakdown at `nprobe=32` on SIFT1M, warm page cache:
+
+```
+load 59.75 ms | search 2.93 ms | merge 0.11 ms | probe 0.08 ms | total 71.88 ms
+```
+
+Across the acceptance run, cluster load is **84.1%** of `t_total` on SIFT and
+**84.3%** on NYTimes, at roughly 1.9 ms per cluster. Actual graph search is 4%.
+
+**What this is.** The page cache is warm and this platform cannot evict it, so
+the file read is a memcpy. The 1.9 ms is `hnswlib.load_index` allocating and
+reconstructing the graph structure in memory. EcoVector as implemented pays
+per-query *deserialisation*, not per-query disk I/O.
+
+**Consequence 1 — it changes what Phase 9 measures.** A phone's flash is far
+slower than this SSD, so the naive expectation is that load cost grows there.
+But the dominant term here is CPU-bound reconstruction, and a phone's CPU is
+also slower. Phase 9 must separate the two — read time versus reconstruction
+time — or it will produce a single load number that cannot be attributed to
+either, and no cost model can be fitted to it.
+
+**Consequence 2 — it inflated check 8's denominator.** The probe fraction
+`t_centroid / t_total` was reported as p50 0.0037, comfortably HEALTHY, but part
+of that comfort came from an unrelated cost sitting in the denominator. With
+cluster load excluded the figure is p50 **0.0237** (p95 0.0298) on SIFT and
+0.0235 on NYTimes. Both are still far inside the 0.15 HEALTHY band, so the
+verdict is unchanged — but the check now reports both numbers and takes its
+verdict from the load-excluded one, which is the figure not flattered by
+something else being expensive.
+
+**Not fixed: no cluster cache.** Caching reconstructed graphs across queries
+would remove most of this cost, and would trade directly against the bounded
+resident footprint that checks 5 and 6 exist to defend. That is a design change
+with its own consequences, not a performance tweak, and it needs its own
+decision rather than being slipped in as an optimisation.
+
+**Related.** ADR-0024 shows the per-cluster graphs currently buy no recall at
+these cluster sizes while costing this reconstruction time, so "drop the graphs"
+and "cache the graphs" are competing answers to the same measurement.

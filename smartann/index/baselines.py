@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import psutil
 
-from smartann.index.ecovector import SearchResult, _anon_mb
+from smartann.index.ecovector import SearchResult, _anon_mb, _modelled_comparisons
 from smartann.index.storage import IndexMeta, IndexPaths
 from smartann.types import AnnConfig, QueryFeatures
 
@@ -83,7 +83,9 @@ class FlatHnswIndex:
             dists=dists[0].astype(np.float64),
             t_cluster_search=elapsed,
             t_total=elapsed,
-            n_dist_modeled=max(cfg.ef_list, cfg.k) * self.meta.m,
+            n_dist_modeled=_modelled_comparisons(
+                max(cfg.ef_list, cfg.k), self.meta.m, self.meta.n_base
+            ),
             anon_rss_mb=max(_anon_mb(mem0), _anon_mb(mem)),
             peak_rss_mb=max(mem0.rss, mem.rss) / 2**20,
             features=QueryFeatures(0.0, 0.0, 0.0, float(np.linalg.norm(q)), int(token_len)),

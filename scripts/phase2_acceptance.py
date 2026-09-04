@@ -258,11 +258,15 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
     only as good as that shared model. Wall-clock, reported separately below, is
     the measured quantity.
     """
-    eco_p, flat_p = index_root(dataset, "ecovector"), index_root(dataset, "flat_hnsw")
-    if eco_p is None or flat_p is None:
-        report(f"4. work-efficiency vs flat HNSW ({dataset})", False, "both indexes must be built")
+    eco_p = index_root(dataset, "ecovector")
+    flat_p = index_root(dataset, "flat_hnsw")
+    ivf_p = index_root(dataset, "ivf_disk")
+    if eco_p is None or flat_p is None or ivf_p is None:
+        report(f"4. work-efficiency vs ivf_disk ({dataset})", False, "all three indexes required")
         return
-    eco, flat = EcoVectorIndex.open(eco_p.root), FlatHnswIndex.open(flat_p.root)
+    eco = EcoVectorIndex.open(eco_p.root)
+    flat = FlatHnswIndex.open(flat_p.root)
+    ivf = EcoVectorIndex.open(ivf_p.root)
     _, queries, gi, gd = load_all(dataset)
     nq = min(300, queries.shape[0])
     q, gi, gd = queries[:nq], gi[:nq], gd[:nq]
@@ -280,6 +284,7 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
         for ef in (16, 32, 64, 128, 256, 512, 1024)
     ]
     eco_s = _sweep_cost_recall(eco, q, gi, gd, eco_grid)
+    ivf_s = _sweep_cost_recall(ivf, q, gi, gd, eco_grid)
     flat_s = _sweep_cost_recall(flat, q, gi, gd, flat_grid)
 
     def cost_for(rows: list[tuple[str, float, float, float]]) -> tuple[float, float, str]:
@@ -289,24 +294,41 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
         return float("nan"), float("nan"), "not reached"
 
     eco_cost, eco_ms, eco_lbl = cost_for(eco_s)
+    ivf_cost, ivf_ms, ivf_lbl = cost_for(ivf_s)
     flat_cost, flat_ms, flat_lbl = cost_for(flat_s)
-    ok = np.isfinite(eco_cost) and np.isfinite(flat_cost) and eco_cost <= flat_cost
 
-    lines = ["ecovector:", f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms/query':>9}"]
-    lines += [f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>9.3f}" for lbl, nd, rec, ms in eco_s]
-    lines += ["", "flat_hnsw:", f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms/query':>9}"]
-    lines += [f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>9.3f}" for lbl, nd, rec, ms in flat_s]
+    # The verdict is EcoVector against ivf_disk, which is the same partition,
+    # the same files and the same load path with brute force instead of graphs.
+    # That isolates exactly what the per-cluster graphs buy.
+    ok = np.isfinite(eco_cost) and np.isfinite(ivf_cost) and eco_cost <= ivf_cost
+
+    def table(name: str, rows: list[tuple[str, float, float, float]]) -> list[str]:
+        out = [f"{name}:", f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms/query':>9}"]
+        out += [f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>9.3f}" for lbl, nd, rec, ms in rows]
+        return [*out, ""]
+
+    lines = table("ecovector", eco_s) + table("ivf_disk (same partition, no graphs)", ivf_s)
     lines += [
+        f"VERDICT -- ecovector vs ivf_disk: recall>={target:.2f} at {eco_cost:,.0f} modelled "
+        f"distance computations ({eco_lbl}) vs {ivf_cost:,.0f} ({ivf_lbl})",
+        f"  wall-clock at that point: {eco_ms:.3f} ms vs {ivf_ms:.3f} ms per query",
+        "  Same partition, same files, same load path -- the only difference is per-cluster",
+        "  graphs versus brute force, so this is a claim the index wins or loses on its merits.",
+        "  n_distance_computations is exact for flat clusters and a CAPPED MODEL for graph",
+        "  traversal (min(ef*M, cluster size)), so the two sides share one cost model.",
         "",
-        f"WORK-EFFICIENCY: recall>={target:.2f} at {eco_cost:,.0f} modelled distance "
-        f"computations ({eco_lbl}, ecovector) vs {flat_cost:,.0f} ({flat_lbl}, flat_hnsw)",
-        "  NOTE: n_distance_computations is exact for flat clusters and MODELLED as ef*M for "
-        "graph traversal, so this compares two cost models on equal terms rather than counting "
-        "real distance evaluations.",
-        f"WALL-CLOCK (separate claim, measured): {eco_ms:.3f} ms vs {flat_ms:.3f} ms per query",
+    ]
+    lines += table("flat_hnsw (REPORTED, NO VERDICT)", flat_s)
+    lines += [
+        f"flat_hnsw reaches recall>={target:.2f} at {flat_cost:,.0f} ({flat_lbl}), "
+        f"{flat_ms:.3f} ms per query.",
+        "  Deliberately carries no verdict. Asking an IVF index to reach a recall target in",
+        "  fewer distance computations than one fully resident graph asks it to win the exact",
+        "  thing it trades away. What it buys instead is the resident footprint measured in",
+        "  check 5 -- read the two together, never this table alone.",
         compare_note(),
     ]
-    report(f"4. work-efficiency vs flat HNSW ({dataset})", ok, NL.join(lines))
+    report(f"4. work-efficiency vs ivf_disk ({dataset})", ok, NL.join(lines))
 
 
 def check5_resident_footprint(dataset: str) -> None:
@@ -431,14 +453,29 @@ def check8_probe_cost(dataset: str) -> None:
     _, queries, _, _ = load_all(dataset)
     cfg = AnnConfig(nprobe=8, ef_centroid=64, ef_list=128, k=10, per_cluster_k=32)
 
-    fractions = []
+    fractions, ex_load, load_share = [], [], []
     for qi in range(min(300, queries.shape[0])):
         r = idx.search(queries[qi], cfg)
         if r.t_total > 0:
             fractions.append(r.t_centroid / r.t_total)
+            load_share.append(r.t_cluster_load / r.t_total)
+            # The same fraction with cluster LOAD removed from the denominator.
+            # 83% of t_total is hnswlib.load_index on a warm page cache, i.e.
+            # graph reconstruction rather than I/O, so leaving it in makes the
+            # probe look cheap partly as an artifact of something else being
+            # expensive. Both numbers are reported; the verdict uses the honest
+            # one, which is this.
+            denom = r.t_total - r.t_cluster_load
+            if denom > 0:
+                ex_load.append(r.t_centroid / denom)
     f = np.asarray(fractions)
-    p50, p95 = float(np.percentile(f, 50)), float(np.percentile(f, 95))
+    g = np.asarray(ex_load)
+    x50, x95 = float(np.percentile(g, 50)), float(np.percentile(g, 95))
+    mean_load = float(np.mean(load_share)) * 100
 
+    # Verdict on the load-excluded figure, which is the one that is not
+    # flattered by an unrelated cost sitting in the denominator.
+    p50 = x50
     if p50 < PROBE_HEALTHY:
         verdict = "HEALTHY (<0.15): the two-phase split is cheap, ef_list stays the primary lever"
     elif p50 <= PROBE_WORKABLE:
@@ -451,10 +488,15 @@ def check8_probe_cost(dataset: str) -> None:
     report(
         f"8. probe cost ({dataset}, BALANCED profile)",
         p50 <= PROBE_WORKABLE,
-        f"t_centroid/t_total: p50 {p50:.4f}, p95 {p95:.4f}{NL}{verdict}{NL}"
-        f"WARM CACHE ONLY -- this platform cannot evict the page cache, so a cluster "
-        f"'load' here is a memcpy, not disk I/O. Phase 3.5 gives the cold-cache number "
-        f"and it may move this verdict.",
+        f"t_centroid / t_total                    : p50 {float(np.percentile(f, 50)):.4f}, "
+        f"p95 {float(np.percentile(f, 95)):.4f}{NL}"
+        f"t_centroid / (t_total - t_cluster_load) : p50 {x50:.4f}, p95 {x95:.4f}  "
+        f"<-- verdict uses this{NL}"
+        f"cluster load is {mean_load:.1f}% of t_total, which inflates the first figure's "
+        f"denominator{NL}{verdict}{NL}"
+        f"WARM CACHE ONLY -- this platform cannot evict the page cache, so a cluster 'load' "
+        f"here is graph RECONSTRUCTION (hnswlib.load_index), not disk I/O. Phase 3.5 gives "
+        f"the cold-cache number and it may move this verdict.",
     )
 
 

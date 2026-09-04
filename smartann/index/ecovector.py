@@ -160,7 +160,7 @@ class EcoVectorIndex:
                 query_token_len=int(token_len),
             ),
             t_centroid_ms=t_centroid_ms,
-            n_dist_modeled=max(cfg.ef_centroid, nprobe) * self.meta.m,
+            n_dist_modeled=_modelled_comparisons(max(cfg.ef_centroid, nprobe), self.meta.m, n_live),
         )
 
     # -- phase two ---------------------------------------------------------
@@ -224,7 +224,9 @@ class EcoVectorIndex:
                 got_i = labels[0].astype(np.int64)
                 got_d = dists[0].astype(np.float64)
                 res.t_cluster_search += (time.perf_counter() - t1) * 1000.0
-                res.n_dist_modeled += max(cfg.ef_list, cfg.per_cluster_k) * self.meta.m
+                res.n_dist_modeled += _modelled_comparisons(
+                    max(cfg.ef_list, cfg.per_cluster_k), self.meta.m, size
+                )
                 del g  # release before opening the next one
 
             found_ids.append(got_i)
@@ -253,6 +255,24 @@ class EcoVectorIndex:
 
     def search(self, query: np.ndarray, cfg: AnnConfig, token_len: int = 0) -> SearchResult:
         return self.finish(query, self.probe(query, cfg, token_len), cfg)
+
+
+def _modelled_comparisons(ef: int, m: int, n_elements: int) -> int:
+    """``ef * M`` comparisons for a graph walk, capped at what the graph contains.
+
+    The cap is a correction, not a refinement. A graph holding ``n_elements``
+    vectors cannot produce more than ``n_elements`` distinct distance
+    computations, and EcoVector's clusters are small -- SIFT's mean cluster
+    holds 500 vectors while ``ef=512, M=32`` claims 16,384 comparisons, 33x more
+    than the cluster contains. Measured against the true containment ceiling
+    (the total membership of the probed clusters), the uncapped figure
+    overstated work by 4.4x at nprobe=8 and 29.5x at nprobe=64.
+
+    Still a model and still an upper bound: HNSW revisits nodes, so the real
+    count is lower again. Phase 3 regresses its cost model on this field, which
+    is why it had to be right before Phase 3 rather than after.
+    """
+    return min(ef * m, n_elements)
 
 
 def _brute_force(q: np.ndarray, vecs: np.ndarray, space: str) -> np.ndarray:
