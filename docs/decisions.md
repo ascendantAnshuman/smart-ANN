@@ -1487,3 +1487,88 @@ output — 4.07 s at `nprobe=64` against 0.055 s at `nprobe=1`, a 74× swing acr
 the action space. A controller whose feedback delay is a function of its own
 action is a harder object than one with a fixed delay, and this argues for a
 time-based window independently of the ratchet.
+
+---
+
+## ADR-0033 — The latency model holds within its regime and cannot extrapolate; the state feature is censored
+
+**Status.** Accepted as the Phase 3 result. Not a failure to be fixed by more
+features; a boundary to be respected and reported.
+
+**The result.** Fitted per-stage on 21,388 quiet queries, validated on 44,067
+held-out contended ones:
+
+```
+                          quiet (fitted)    contended (held out)
+total latency MAPE            14.75%              35.87%
+                          PASS (<15%)         FAIL (<15%)
+
+per stage, contended:   t_centroid 33.7%   t_cluster_load 28.7%
+                        t_cluster_search 31.2%   t_merge 71.9%
+```
+
+Every stage **underpredicts** under contention. `t_cluster_load` predicts 2.08 ms
+against 4.89 ms measured.
+
+**First diagnosis, and the one principled correction made.** A work-only model
+cannot express latency, because latency is work divided by available machine.
+Between phases `cpu_util` went 0.418 → 1.000 while `t_cluster_load` went
+4.111 → 10.597 ms **for identical work**. `dev_cpu_util` was therefore added to
+every CPU-competing stage. This was a specification correction rather than a
+search: the variable was named from the mechanism before the refit, it is the
+same quantity the controller already reads, and it was validated on held-out
+data rather than on the data that motivated it.
+
+**It barely helped: 36.44% → 35.87%. That is the finding.**
+
+**Why, measured rather than assumed.** `cpu_util` is *censored*. Across the
+contended data, **12,469 rows sit at exactly 1.000**, and within those rows
+`t_cluster_load` spans **0.67 ms to 27.59 ms — a 41x spread while the feature
+does not move at all**. A feature pinned at its ceiling cannot express how far
+past the ceiling the machine is, and no coefficient on it can recover that.
+
+**A second mechanism, also measured.** The contended-phase median `cpu_util` is
+0.446, *lower* than one would expect from a saturated machine. The telemetry
+sampler is a background thread at 10 Hz, and under full contention it is itself
+starved and scheduled late. So the feature is not merely censored at the top: it
+is **undersampled precisely when it matters**. This was predicted when the
+monitor was written and is now measured.
+
+**Consequences, stated rather than patched.**
+
+1. **The Phase 3 latency criterion is met within the regime it was fitted on and
+   is not met outside it.** Reported as two numbers, never as one. A single
+   averaged MAPE over both phases would have read as roughly 25% and hidden that
+   the model is excellent in one regime and unusable in the other.
+2. **Phase 6 must not use this model to predict contended latency.** It is sound
+   for choosing effort on a quiet machine and unsound for anticipating a
+   disturbance. That is precisely why the AIMD governor is *reactive* -- it
+   measures latency rather than predicting it -- and this result is an argument
+   for keeping the controller reactive rather than model-based.
+3. **The fix is a load metric that does not saturate**, such as run-queue length
+   or a load average, not another coefficient on a censored feature. Recorded as
+   a Phase 3.5 item because the phone needs the same treatment and its
+   `/proc/loadavg` is readable where Windows' is emulated.
+4. **`cfg_ann_ef_centroid` is unidentifiable**: constant at 128 in every recorded
+   run, so `t_centroid`'s dependence on it cannot be fitted. The first fit
+   returned R2 = 0.0000 -- an intercept wearing a regression's clothes. Reported
+   in `UNIDENTIFIABLE` rather than silently fitted. ADR-0025 found `ef_centroid`
+   to be free, so it may never need to vary.
+
+**Energy: specified, implemented, deliberately not fitted.** The model is
+`E = V·[I_cpu·t_cpu + I_io·t_io]` with `t_cluster_load` on the **CPU** side
+(ADR-0026 amendment, ADR-0031). `assert_energy_measurable()` refuses to fit or
+record it on this platform and the fit script reports BLOCKED rather than a
+number. Phase 3 closes with **no energy MAPE at all**, which is the honest
+outcome: a criterion that cannot be evaluated here is not marked PASS.
+
+**Addendum — two coefficients that must not be read separately.** In the
+recorded data `n_cluster_loads` and `bytes_read` correlate at **r = 0.966**
+(design-matrix condition number 4.9e6), because EcoVector's clusters are of
+similar size. Their *combined* effect is well determined — `t_cluster_load`
+reaches R² = 0.99 — but the individual coefficients are unstable, and quoting
+"0.69 ms per cluster load" as a standalone constant would be over-reading the
+fit. This surfaced from a unit test whose synthetic `bytes_read` was exactly
+proportional to `n_cluster_loads`: the fit put all the weight on one feature and
+none on the other, which is what perfect collinearity does and what near-perfect
+collinearity does more quietly.
