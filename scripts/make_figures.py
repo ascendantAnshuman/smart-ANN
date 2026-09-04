@@ -54,6 +54,22 @@ def _event_time(manifest: dict, name: str) -> float | None:
     return None
 
 
+def _controller_p95(v, window: int = 50):
+    """The estimator the policy actually consumed, reconstructed from the parquet.
+
+    RollingWindow observes a latency AFTER the query completes and the policy
+    reads p95 BEFORE the next one, so at query i the controller saw the p95 of
+    queries [i-window, i-1]. Reproducible exactly from stored latencies in order,
+    which beats adding a field: the plotted signal is provably the one acted on
+    rather than a similar-looking one. A time-based trailing p95 would show a
+    reader a trace that never justified the action in the nprobe panel.
+    """
+    out = np.full(v.size, np.nan)
+    for i in range(1, v.size):
+        out[i] = np.percentile(v[max(0, i - window) : i], 95)
+    return out
+
+
 def _rolling_p95(
     t: np.ndarray, v: np.ndarray, window_s: float = 3.0, stride: int = 1
 ) -> np.ndarray:
@@ -164,14 +180,24 @@ def feedback_delay_table(latency_by_nprobe: dict[int, float], window: int = 50) 
 
 
 def fig_headline(runs: dict[str, Path], out: Path) -> None:
-    """The figure the project is about: does the controller hold the target?"""
+    """The figure the project is about: does the controller hold the target?
+
+    Each policy is normalised to ITS OWN start and ITS OWN event times. The runs
+    are sequential -- static then aimd -- so a shared origin put the second run's
+    data outside the first run's zoom window entirely, leaving one panel empty
+    and another showing a single policy. Elapsed-time-within-run is the axis that
+    makes them comparable.
+    """
     data = {name: _load_run(d) for name, d in runs.items()}
+    # Per-run origin and per-run phase boundaries.
+    origin, burn = {}, {}
+    for name, (df, mf) in data.items():
+        origin[name] = float(df["t_wall"].min())
+        a, b = _event_time(mf, "burners_start"), _event_time(mf, "burners_stop")
+        if a is None or b is None:
+            raise ValueError(f"{name}: manifest has no burners_start/burners_stop to shade")
+        burn[name] = (a - origin[name], b - origin[name])
     ref = next(iter(data.values()))[1]
-    t0 = min(df["t_wall"].min() for df, _ in data.values())
-    burn_a = _event_time(ref, "burners_start")
-    burn_b = _event_time(ref, "burners_stop")
-    if burn_a is None or burn_b is None:
-        raise ValueError("manifest has no burners_start/burners_stop events to shade")
     target = float(ref["latency_target_ms"])
 
     stats = {name: phase_stats(df, mf, target) for name, (df, mf) in data.items()}
@@ -184,10 +210,10 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
     fig, axes = plt.subplots(4, 1, figsize=(11, 14), gridspec_kw={"height_ratios": [3, 3, 3, 2]})
     colors = {"static": "#c1121f", "aimd": "#0353a4"}
 
-    # -- panel 1: the whole run -------------------------------------------
+    # -- panel 1: the whole run, each policy on its own clock ---------------
     ax = axes[0]
     for name, (df, _mf) in data.items():
-        t = df["t_wall"].to_numpy() - t0
+        t = df["t_wall"].to_numpy() - origin[name]
         ax.plot(
             t,
             _rolling_p95(t, df["t_total"].to_numpy(), stride=25),
@@ -195,45 +221,56 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
             color=colors.get(name),
             label=f"{name} (n={len(df):,})",
         )
+    a0, b0 = burn[next(iter(data))]
+    ax.axvspan(a0, b0, color="grey", alpha=0.18, lw=0, label="disturbance")
     ax.axhline(target, ls="--", c="k", lw=1.2, label=f"target {target:.1f} ms")
-    for a in axes[:2]:
-        a.axvspan(burn_a - t0, burn_b - t0, color="grey", alpha=0.18, lw=0)
     ax.set_ylabel("p95 latency (ms, 3 s trailing)")
-    ax.set_title(f"Adaptive retrieval effort under CPU contention\n{INDEX_LABEL}", fontsize=10)
+    ax.set_xlabel("elapsed time within run (s)")
+    ax.set_title(
+        f"Adaptive retrieval effort under a mid-run disturbance\n{INDEX_LABEL}", fontsize=10
+    )
     ax.legend(fontsize=8, loc="upper left")
 
-    # -- panel 2: the transient, which is invisible at full scale ----------
+    # -- panel 2: the transient, on the estimator the controller consumed ---
     ax = axes[1]
-    lo, hi = burn_a - t0 - 10.0, burn_a - t0 + 10.0
+    lo, hi = a0 - 10.0, a0 + 10.0
     for name, (df, _mf) in data.items():
-        t = df["t_wall"].to_numpy() - t0
-        p95 = _rolling_p95(t, df["t_total"].to_numpy(), stride=25)
+        t = df["t_wall"].to_numpy() - origin[name]
         m = (t >= lo) & (t <= hi)
-        ax.plot(t[m], p95[m], lw=1.6, color=colors.get(name), label=name)
+        ax.plot(
+            t[m],
+            _controller_p95(df["t_total"].to_numpy())[m],
+            lw=1.7,
+            color=colors.get(name),
+            label=f"{name}: 50-sample p95 (what the policy read)",
+        )
+    ax.axvspan(a0, hi, color="grey", alpha=0.18, lw=0)
     ax.axhline(target, ls="--", c="k", lw=1.2)
     ax.set_xlim(lo, hi)
     ax.set_ylabel("p95 latency (ms)")
-    ax.set_title("Zoom: +/- 10 s around contention onset -- the control action itself", fontsize=9)
+    ax.set_title(
+        "Zoom around the disturbance. This is the estimator the controller acted on", fontsize=9
+    )
     ax.legend(fontsize=8, loc="upper left")
 
     # -- panel 3: what the controller actually did -------------------------
     ax = axes[2]
     df, _ = data["aimd"]
-    t = df["t_wall"].to_numpy() - t0
-    m = (t >= lo) & (t <= hi)
+    t = df["t_wall"].to_numpy() - origin["aimd"]
+    a1, _b1 = burn["aimd"]
+    m = (t >= a1 - 10.0) & (t <= a1 + 10.0)
     ax.step(
         t[m],
         df["cfg_ann_nprobe"].to_numpy()[m],
         where="post",
         color="#0353a4",
-        lw=1.6,
-        label="nprobe (adaptive)",
+        lw=1.5,
+        label="nprobe chosen (adaptive)",
     )
+    ax.axvspan(a1, a1 + 10.0, color="grey", alpha=0.18, lw=0)
+    ax.set_xlim(a1 - 10.0, a1 + 10.0)
     ax.set_ylabel("nprobe")
-    ax.set_xlabel("elapsed time (s)")
-    ax.set_xlim(lo, hi)
-    ax.axvspan(burn_a - t0, min(hi, burn_b - t0), color="grey", alpha=0.18, lw=0)
-
+    ax.set_xlabel("elapsed time within run (s)")
     rec = df["recall_at_k"].to_numpy(dtype=float)[m]
     if np.isfinite(rec).any():
         ax2 = ax.twinx()
@@ -249,7 +286,8 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
         ax2.legend(fontsize=8, loc="lower right")
     ax.legend(fontsize=8, loc="upper left")
     ax.set_title(
-        "The trade the controller makes: effort down, recall down, target held", fontsize=9
+        "The controller sits at the nprobe floor in every phase -- the collapse, not an adaptation",
+        fontsize=9,
     )
 
     # -- panel 4: the number the story rests on ----------------------------
@@ -269,10 +307,9 @@ def fig_headline(runs: dict[str, Path], out: Path) -> None:
             )
     ax.set_xticks(x, phases)
     ax.set_ylabel("queries over target (%)")
-    ax.set_title(sentence, fontsize=9, wrap=True)
+    ax.set_title(sentence, fontsize=8.5, wrap=True)
     ax.legend(fontsize=8)
 
-    fig.suptitle("")
     fig.tight_layout()
     fig.savefig(out)
     plt.close(fig)
@@ -335,24 +372,64 @@ def fig_footprint(accept_json: Path, out: Path) -> None:
 
 
 def fig_regime(regime_json: Path, out: Path) -> None:
-    """Recall and wall-clock against the paper's own condition, ef_L*M' / (N/Nc)."""
+    """Wall-clock cost of the graphs against MobileRAG's own condition.
+
+    Plots the RATIO to ivf_disk rather than absolute milliseconds. The regime
+    run's absolutes are drift-affected -- non-monotone in nprobe, moving for all
+    three variants at once -- while the within-nprobe ratios are stable, which is
+    exactly what interleaving buys (ADR-0030). Plotting the absolutes would put
+    the noisiest quantity on the y-axis of the figure that carries the claim.
+    """
     d = json.loads(regime_json.read_text(encoding="utf-8"))
-    fig, ax = plt.subplots(figsize=(7, 4.2))
-    for label, series in d["series"].items():
-        ax.plot(series["ratio"], series["ms"], "o-", lw=1.6, label=label)
-    ax.axvline(1.0, ls="--", c="k", lw=1.2)
+    series = d["series"]
+    base = series["ivf_disk (no graphs)"]
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    for label, s_ in sorted(series.items()):
+        if label.startswith("ivf"):
+            continue
+        ratios = [m / b for m, b in zip(s_["ms"], base["ms"], strict=True)]
+        x = s_["ratio"][0]
+        ax.scatter([x] * len(ratios), ratios, s=42, zorder=3, label=f"{label} (per nprobe)")
+        ax.scatter([x], [np.median(ratios)], s=150, marker="_", lw=2.5, color="k", zorder=4)
+
+    ax.axhline(1.0, ls="-", c="#444", lw=1.0)
+    ax.axvline(1.0, ls="--", c="#c1121f", lw=1.4)
     ax.annotate(
-        "graphs can pay  <--|-->  graphs cannot pay",
-        (1.0, ax.get_ylim()[1]),
-        ha="center",
+        "MobileRAG's condition:\ngraphs can pay only LEFT of this line",
+        (1.0, ax.get_ylim()[1] * 0.95),
+        ha="right",
         va="top",
-        fontsize=8,
+        fontsize=8.5,
+        color="#c1121f",
     )
+    ax.annotate(
+        "default config\n(ef_L*M'/(N/Nc) = 2.05)",
+        (2.05, 1.0),
+        xytext=(2.05, 1.9),
+        ha="center",
+        fontsize=8,
+        arrowprops={"arrowstyle": "->", "lw": 1},
+    )
+    ax.scatter(
+        [2.05],
+        [2.0],
+        marker="X",
+        s=110,
+        color="#c1121f",
+        zorder=5,
+        label="default config (measured 2x slower, check 4)",
+    )
+
     ax.set_xscale("log")
-    ax.set_xlabel(r"$ef_L \cdot M' \; / \; (N/N_c)$   (MobileRAG's own condition)")
-    ax.set_ylabel("latency (ms/query)")
-    ax.set_title("The regime condition, and where our configurations sit", fontsize=9)
-    ax.legend(fontsize=8)
+    ax.set_xlabel(r"$ef_L \cdot M' \;/\; (N/N_c)$   — MobileRAG's own condition")
+    ax.set_ylabel("wall-clock relative to no graphs\n(>1 means the graphs cost time)")
+    ax.set_title(
+        "Even deep inside the regime where the paper's model says the graphs\n"
+        "should pay, they cost 2.6-3.5x wall-clock at identical recall",
+        fontsize=9.5,
+    )
+    ax.legend(fontsize=7.5, loc="upper left")
     fig.savefig(out)
     plt.close(fig)
     print(f"wrote {out}", flush=True)

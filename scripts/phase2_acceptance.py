@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import gc
 import itertools
+import json
 import os
 import shutil
 import sys
@@ -33,6 +34,9 @@ from smartann.index.storage import IndexBuildConfig, IndexMeta, IndexPaths, memo
 from smartann.types import AnnConfig
 
 RESULTS: list[tuple[str, bool, str]] = []
+# Structured measurements for the figures. Printed output is for humans;
+# this is what make_figures.py reads, so no number is retyped by hand.
+MEASURED: dict[str, Any] = {}
 NL = chr(10) + "       "
 
 # MobileRAG Figure 6: EcoVector's reported resident footprint. If ours lands in
@@ -244,6 +248,9 @@ def check2_ef_monotonicity(dataset: str = "sift1m") -> None:
         ms = (time.perf_counter() - t0) * 1000 / nq
         se, _ = recall_at_k_batch(ids, dists, gi[:nq], gd[:nq], k=10)
         recalls.append(float(se.mean()))
+        MEASURED.setdefault("check2", []).append(
+            {"nprobe": nprobe, "ef_list": ef, "recall": float(se.mean()), "ms": ms}
+        )
         rows.append(
             f"nprobe={nprobe:<3} ef_list={ef:<4} recall {se.mean():.4f}  {ms:6.3f} ms/query"
         )
@@ -472,6 +479,13 @@ def check5_resident_footprint(dataset: str) -> None:
             f"MobileRAG Figure 6 reports {paper:.2f} MB for EcoVector on this dataset; "
             f"ours is {resident:.2f} MB ({resident / paper:.2f}x)"
         )
+    MEASURED.setdefault("check5", {})[dataset] = resident
+    MEASURED.setdefault("check5_detail", {})[dataset] = {
+        "measured_mb": resident,
+        "budget_mb": budget,
+        "mobilerag_fig6_mb": paper,
+        "base_mb": base_bytes / 2**20,
+    }
     report(f"5. resident footprint ({dataset})", resident <= budget, NL.join(lines))
 
 
@@ -679,6 +693,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--datasets", nargs="*", default=["sift1m", "nytimes"])
     ap.add_argument("--skip", nargs="*", default=[])
+    ap.add_argument("--emit-json", default="results/phase2_summary.json")
     args = ap.parse_args()
 
     checks = {
@@ -699,6 +714,11 @@ def main() -> int:
             continue
         fn()
     summary()
+    if MEASURED:
+        out = Path(args.emit_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(MEASURED, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"wrote {out}", flush=True)
     return 0 if all(p for _, p, _ in RESULTS) else 1
 
 
