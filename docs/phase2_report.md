@@ -25,6 +25,14 @@ ceiling — the best achievable with a *perfect* in-cluster search — is 0.8709
 and measured index-overlap recall is 0.8603. In-cluster search loses 1.1 points
 of a 13.9-point shortfall. `ef_list` and `M` cannot recover it.
 
+Measured against corpus coverage rather than `nprobe` (ADR-0025 amendment),
+**NYTimes needs ~40% of the corpus examined to reach a 0.95 ceiling** — against
+under 2% for SIFT. That 20x difference is a property of 256-dimensional angular
+data under IVF partitioning, and no setting of `nc`, `M` or `ef_list` repairs
+it. A finer partition is strictly better here on both recall-per-work and
+memory; the original "lower nc helps" reading was an artifact of comparing at
+equal `nprobe`, which is 4x different work across `nc`.
+
 ## Thresholds that did not discriminate, stated as such
 
 Two bands were pre-registered too loose to carry information. Recording this
@@ -43,9 +51,11 @@ data is fitting the threshold to the result.
 
 ## Findings that outrank the failures
 
-1. **The per-cluster graphs buy nothing at these cluster sizes** (ADR-0024).
-   EcoVector and ivf_disk reach identical recall at identical modelled work,
-   and ivf_disk is 2.3–3.7x faster. `ef * M >= 1024` exceeds the mean cluster
+1. **The per-cluster graphs buy nothing at these cluster sizes** (ADR-0024
+   + amendment). EcoVector and ivf_disk reach identical recall at identical
+   modelled work, and ivf_disk is **4.1x faster** at the matched operating
+   point (15.470 ms vs 62.901 ms, medians of 5 repeats after warmup), stable at
+   4.2-4.5x across the sweep. `ef * M >= 1024` exceeds the mean cluster
    (500 / 539), so every per-cluster graph search is exhaustive anyway.
 2. **83% of per-query time is `hnswlib.load_index`** on a warm cache, i.e.
    graph reconstruction rather than I/O (ADR-0026). Search is 4%.
@@ -65,3 +75,12 @@ data is fitting the threshold to the result.
   place. Same axis; should be decided together.
 - Whether to cache reconstructed cluster graphs, which trades against the
   bounded footprint checks 5 and 6 defend.
+
+  **This one must be decided before Phase 3 fits its cost model, not after.**
+  A cache turns the dominant cost term from `n_cluster_loads` into
+  `n_cache_misses`. Those are different random variables with different
+  distributions -- misses depend on query locality and cache size, loads do not
+  -- so a model fitted on one is not merely imprecise for the other, it is
+  invalid. Fitting first and caching later would silently invalidate every
+  latency and energy prediction Phase 3 produces, and the failure would surface
+  as unexplained controller underperformance in Phase 6.

@@ -917,3 +917,158 @@ decision rather than being slipped in as an optimisation.
 **Related.** ADR-0024 shows the per-cluster graphs currently buy no recall at
 these cluster sizes while costing this reconstruction time, so "drop the graphs"
 and "cache the graphs" are competing answers to the same measurement.
+
+---
+
+## ADR-0027 — SIFT1M's `nc` is pinned to 2000, not `auto`
+
+**Status.** Accepted retroactively. The decision was made and reasoned in Phase
+1; it was recorded only in the dataset registry's `notes` field, which is not
+where decisions live.
+
+**The discrepancy.** `default_nc="auto"` resolves to `round(sqrt(n_base))`,
+which is 1000 for SIFT1M — but SIFT built at nc=2000. The registry carries
+`default_nc=2000` explicitly for SIFT and `"auto"` for NYTimes (538) and SQuAD
+(215), so the two datasets are governed by different rules.
+
+**The reason, as recorded in the registry notes.** MobileRAG's Figure 11 sweeps
+`Nc` over 1000-4000 on SIFT, and 2000 sits in the middle of that range; pinning
+it makes our EcoVector build directly comparable to the paper's. `sqrt(N)` is a
+generic heuristic, and matching the baseline we are measuring against is worth
+more than internal consistency with a rule of thumb.
+
+**Why this ADR exists anyway.** A per-dataset override that changes cluster
+count by 2x is exactly the kind of thing that later looks like a bug, and a
+reason living in a string field of a registry entry is not discoverable from the
+decision log. It is now in both places. It also matters for reading Phase 2's
+results: SIFT's mean cluster is 500 rather than the ~1000 that `auto` would
+have produced, which feeds directly into ADR-0024's finding that `ef * M`
+exceeds the cluster size and the per-cluster graphs are therefore exhaustive.
+
+**Consequence for the open `nc` question.** Any decision to change NYTimes' `nc`
+should say whether SIFT's pin stays. They are independent knobs today, and the
+comparability argument applies only to SIFT.
+
+---
+
+## ADR-0025 (amendment) — the `nc` finding was an artifact; the axis was wrong
+
+**Status.** Supersedes finding 3 of ADR-0025. The original conclusion was wrong.
+
+**The error.** The `nc` table held `nprobe` fixed, but `nprobe` is not a
+fixed-cost axis across `nc`. At nc=538 a probe of 64 touches 64 x 539 = 34,470
+vectors (11.9% of the corpus); at nc=128 the same `nprobe` touches 64 x 2,264 =
+144,896 (50%). The lower-`nc` rows looked better because they examined roughly
+4x more data. Two rows were worse still: nc=64 at nprobe=64 and nc=128 at
+nprobe=128 probe *every* cluster, so their 1.0000 ceilings were brute force with
+extra steps rather than operating points.
+
+**Recomputed against corpus coverage** — vectors contained in the probed
+clusters — which is the shared-cost axis:
+
+```
+    nc  peakMB     5.0%    10.0%    12.5%    20.0%    30.0%    40.0%    50.0%
+    64   12.89   0.6209   0.7114   0.7434   0.8162   0.8740   0.9139   0.9428
+   128    7.59   0.6951   0.7771   0.8020   0.8516   0.8971   0.9293   0.9515
+   256    5.22   0.7440   0.8134   0.8336   0.8780   0.9160   0.9429   0.9609
+   538    2.86   0.7872   0.8440   0.8619   0.8983   0.9307   0.9542   0.9691
+  1024    2.14   0.8225   0.8682   0.8848   0.9165   0.9443   0.9630   0.9706
+```
+
+**The ordering reverses completely, at every coverage level.** A *finer*
+partition localises NYTimes better per unit of data examined, monotonically from
+nc=64 to nc=1024 — and it simultaneously costs *less* memory, since
+`cluster_peak` falls from 12.89 MB to 2.14 MB. Both axes point the same way, the
+opposite way from the original reading. The corrected finding is that coarsening
+`nc` is strictly worse for NYTimes on both recall-per-work and memory.
+
+The wall-clock claim in the superseded section ("nc=128 is also cheaper because
+64 loads beat 200") is withdrawn: it was never measured, and it now looks
+backwards on the recall side.
+
+**But finer is not free, because load cost is per-cluster, not per-vector.**
+ADR-0026 measured ~1.9 ms per cluster load dominating query time. Reaching 40%
+coverage needs roughly 192 loads at nc=538 and roughly 410 at nc=1024 — about
+365 ms against 780 ms. So the partition trade is genuinely two-sided: finer wins
+on recall-per-vector-examined and on memory, coarser wins on recall-per-second.
+Which one governs depends entirely on whether cluster loads stay expensive,
+i.e. on the cache decision. The three open questions are one question.
+
+**The number that actually matters.** At nc=538, the ceiling reaches:
+
+```
+ nprobe   coverage   ceiling          ceiling 0.95 -> 38.0% coverage (nprobe ~185)
+     64     13.94%    0.8709          ceiling 0.96 -> 43.9% coverage (nprobe ~216)
+    128     26.86%    0.9232
+    192     39.41%    0.9533
+    256     51.58%    0.9715
+```
+
+**NYTimes needs ~40% of the corpus examined to reach recall@10 of 0.95, with a
+perfect in-cluster search.** That is a property of 256-dimensional angular data
+against IVF partitioning, not a tuning failure and not something `nc`, `M` or
+`ef_list` can repair. An IVF index that must touch 40% of the corpus is barely
+an index on this dataset. SIFT reaches the same ceiling at nprobe=32 of 2000,
+i.e. under 2% coverage — a 20x difference in how well the data partitions.
+
+This is the finding to report about NYTimes, and it is what any decision on the
+0.95 threshold should be made against.
+
+---
+
+## ADR-0024 (amendment) — the timing half re-measured; the claim strengthens
+
+**Status.** Replaces the wall-clock numbers in ADR-0024. The recall half is
+unchanged and was never in doubt.
+
+**Why it needed redoing.** The original check 4 timed each config once, with no
+warmup. It reported 27.076 ms and 8.589 ms for two configs doing provably
+identical work (10,724 modelled comparisons each) -- a 3x spread at zero work
+difference, which is first-touch page-cache behaviour being read as a
+performance result. The ADR asserted "2.3-3.7x faster" while its own caveat said
+the numbers were unreliable, so it contradicted itself.
+
+**Harness fix.** Recall and timing are now measured separately, because they
+need different things: recall over every query once (breadth), timing over 50
+queries with a warmup pass and 5 repeats taking the per-query minimum, reported
+as median with inter-quartile range (repetition). A wall-clock figure without a
+dispersion estimate beside it is not quotable.
+
+**Re-measured, sift1m:**
+
+```
+                       config  dist_comps   recall  ms median      IQR
+ ecovector      nprobe=2,ef=32      3,087   0.4473      4.507    0.393
+                nprobe=32,ef=256   19,323   0.9537     62.901    5.457
+                nprobe=64,ef=512   36,323   0.9907    139.114    8.958
+ ivf_disk       nprobe=2,ef=32      3,098   0.4490      1.060    0.112
+                nprobe=32,ef=256   19,323   0.9537     15.470    1.295
+                nprobe=64,ef=512   36,323   0.9907     30.905    2.334
+```
+
+**Re-measured, nytimes:**
+
+```
+ ecovector      nprobe=2,ef=32      1,918   0.6330      5.423    2.040
+                nprobe=64,ef=512   41,008   0.8820    147.977   10.623
+ ivf_disk       nprobe=2,ef=32      2,124   0.6380      1.887    0.931
+                nprobe=64,ef=512   40,992   0.8823     45.436    4.615
+```
+
+**The dispersion is now sane** -- IQRs of 0.1-10 ms on values of 1-148 ms,
+proportional to magnitude -- and both variants are monotone in work, which the
+single-shot version was not. The 3x-at-identical-work pathology is gone.
+
+**The claim strengthens rather than weakens.** ivf_disk is **4.1x** faster at the
+matched operating point (15.470 ms against 62.901 ms), not the 2.3x originally
+claimed, and the ratio is stable at 4.2-4.5x across the whole sweep on both
+datasets. The earlier figure understated the gap because the noise it rested on
+happened to run the wrong way.
+
+**Combined finding, now on solid footing both halves.** At these cluster sizes
+the per-cluster HNSW graphs deliver identical recall to brute force -- four
+decimal places, seven configurations, two datasets, two different algorithms --
+and cost roughly 4x the wall-clock plus 263 MB of extra disk on SIFT. Two
+independent algorithms agreeing that precisely is strong evidence both are
+exhaustive within each cluster, which is exactly what `ef * M >= 1024` against a
+mean cluster of 500 predicts.

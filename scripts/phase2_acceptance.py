@@ -217,12 +217,23 @@ def _sweep_cost_recall(
     gi: np.ndarray,
     gd: np.ndarray,
     grid: list[AnnConfig],
-) -> list[tuple[str, float, float, float]]:
-    """(label, mean distance computations, recall, ms/query) for each config."""
+    warmup: int = 1,
+    repeats: int = 5,
+) -> list[tuple[str, float, float, float, float]]:
+    """(label, mean distance computations, recall, median ms/query, IQR ms) per config.
+
+    Timed per query with warmup and repeats, reporting median and inter-quartile
+    range. The single-shot version reported 27.076 ms and 8.589 ms for two
+    configs doing provably identical work (10,724 modelled comparisons each) --
+    a 3x spread at zero work difference, which is first-touch page-cache effects
+    being read as a performance result. A wall-clock number without a dispersion
+    estimate beside it should not be quoted, so this returns one.
+    """
+    n_timed = min(50, queries.shape[0])
     out = []
     for cfg in grid:
+        # Recall pass: every query, once. Recall needs breadth, not repetition.
         total_dist = 0
-        t0 = time.perf_counter()
         ids = np.full((queries.shape[0], cfg.k), -1, dtype=np.int64)
         dists = np.full((queries.shape[0], cfg.k), np.inf, dtype=np.float64)
         for qi in range(queries.shape[0]):
@@ -230,10 +241,32 @@ def _sweep_cost_recall(
             n = min(r.ids.size, cfg.k)
             ids[qi, :n], dists[qi, :n] = r.ids[:n], r.dists[:n]
             total_dist += r.n_distance_computations
-        ms = (time.perf_counter() - t0) * 1000 / queries.shape[0]
+
+        # Timing pass: a subset, repeated. Timing needs repetition, not breadth,
+        # and the recall pass above has already warmed the page cache for these.
+        for _ in range(warmup):
+            for qi in range(n_timed):
+                index.search(queries[qi], cfg)  # type: ignore[attr-defined]
+        per_query_ms: list[float] = []
+        for qi in range(n_timed):
+            best = float("inf")
+            for _ in range(repeats):
+                t0 = time.perf_counter()
+                index.search(queries[qi], cfg)  # type: ignore[attr-defined]
+                best = min(best, (time.perf_counter() - t0) * 1000.0)
+            per_query_ms.append(best)
+
+        t = np.asarray(per_query_ms)
         se, _ = recall_at_k_batch(ids, dists, gi, gd, k=cfg.k)
-        label = f"nprobe={cfg.nprobe},ef={cfg.ef_list}"
-        out.append((label, total_dist / queries.shape[0], float(se.mean()), ms))
+        out.append(
+            (
+                f"nprobe={cfg.nprobe},ef={cfg.ef_list}",
+                total_dist / queries.shape[0],
+                float(se.mean()),
+                float(np.median(t)),
+                float(np.percentile(t, 75) - np.percentile(t, 25)),
+            )
+        )
     return sorted(out, key=lambda row: row[1])
 
 
@@ -287,8 +320,8 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
     ivf_s = _sweep_cost_recall(ivf, q, gi, gd, eco_grid)
     flat_s = _sweep_cost_recall(flat, q, gi, gd, flat_grid)
 
-    def cost_for(rows: list[tuple[str, float, float, float]]) -> tuple[float, float, str]:
-        for label, ndist, rec, ms in rows:
+    def cost_for(rows: list[tuple[str, float, float, float, float]]) -> tuple[float, float, str]:
+        for label, ndist, rec, ms, _iqr in rows:
             if rec >= target:
                 return ndist, ms, label
         return float("nan"), float("nan"), "not reached"
@@ -302,16 +335,23 @@ def check4_ef_efficiency_and_wallclock(dataset: str) -> None:
     # That isolates exactly what the per-cluster graphs buy.
     ok = np.isfinite(eco_cost) and np.isfinite(ivf_cost) and eco_cost <= ivf_cost
 
-    def table(name: str, rows: list[tuple[str, float, float, float]]) -> list[str]:
-        out = [f"{name}:", f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms/query':>9}"]
-        out += [f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>9.3f}" for lbl, nd, rec, ms in rows]
+    def table(name: str, rows: list[tuple[str, float, float, float, float]]) -> list[str]:
+        out = [
+            f"{name}:",
+            f"{'config':>22} {'dist_comps':>11} {'recall':>8} {'ms median':>10} {'IQR':>8}",
+        ]
+        out += [
+            f"{lbl:>22} {nd:>11,.0f} {rec:>8.4f} {ms:>10.3f} {iqr:>8.3f}"
+            for lbl, nd, rec, ms, iqr in rows
+        ]
         return [*out, ""]
 
     lines = table("ecovector", eco_s) + table("ivf_disk (same partition, no graphs)", ivf_s)
     lines += [
         f"VERDICT -- ecovector vs ivf_disk: recall>={target:.2f} at {eco_cost:,.0f} modelled "
         f"distance computations ({eco_lbl}) vs {ivf_cost:,.0f} ({ivf_lbl})",
-        f"  wall-clock at that point: {eco_ms:.3f} ms vs {ivf_ms:.3f} ms per query",
+        f"  wall-clock at that point (median of {5} repeats after warmup): "
+        f"{eco_ms:.3f} ms vs {ivf_ms:.3f} ms per query",
         "  Same partition, same files, same load path -- the only difference is per-cluster",
         "  graphs versus brute force, so this is a claim the index wins or loses on its merits.",
         "  n_distance_computations is exact for flat clusters and a CAPPED MODEL for graph",
