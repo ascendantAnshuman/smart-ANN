@@ -62,7 +62,8 @@ def fit_partition(
     nc: int,
     space: str,
     seed: int,
-    batch_size: int = 4096,
+    batch_size: int | str = "auto",
+    n_init: int = 1,
     max_iter: int = 100,
 ) -> KMeansResult:
     """Partition *base* into *nc* clusters, spherically when the space is ip.
@@ -84,12 +85,13 @@ def fit_partition(
 
     t0 = time.perf_counter()
     x = np.ascontiguousarray(base, dtype=np.float32)
+    batch = 10 * nc if batch_size == "auto" else int(batch_size)
     km = MiniBatchKMeans(
         n_clusters=nc,
         random_state=seed,
-        batch_size=batch_size,
+        batch_size=batch,
         max_iter=max_iter,
-        n_init=3,
+        n_init=n_init,
         verbose=0,
     )
     km.fit(x)
@@ -170,6 +172,8 @@ def build_ecovector(
     config_hash: str,
     out: IndexPaths,
     index_variant: str = "ecovector",
+    kmeans_batch_size: int | str = "auto",
+    kmeans_n_init: int = 1,
     workers: int | None = None,
     quiet: bool = False,
 ) -> BuildResult:
@@ -185,7 +189,7 @@ def build_ecovector(
     workers = workers or (os.cpu_count() or 1)
 
     n_base, dim = base.shape
-    part = fit_partition(base, nc, space, seed)
+    part = fit_partition(base, nc, space, seed, kmeans_batch_size, kmeans_n_init)
     peak = max(peak, proc.memory_info().rss)
     if not quiet:
         print(
@@ -252,7 +256,9 @@ def build_ecovector(
         build_seconds=time.perf_counter() - t_start,
         build_peak_rss_mb=(peak - rss0) / 2**20,
         build_workers=int(workers),
-        kmeans_algorithm=KMEANS_ALGORITHM,
+        kmeans_algorithm=(
+            f"{KMEANS_ALGORITHM}(batch_size={kmeans_batch_size},n_init={kmeans_n_init})"
+        ),
         n_empty_clusters=int(part.n_empty),
         n_flat_clusters=kinds.count(CLUSTER_FLAT),
         n_graph_clusters=len(kinds) - kinds.count(CLUSTER_FLAT) - part.n_empty,

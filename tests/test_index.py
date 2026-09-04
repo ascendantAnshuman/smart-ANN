@@ -420,3 +420,91 @@ def test_ivf_disk_variant_makes_every_cluster_flat(tmp_path: Path) -> None:
     r = idx.search(base[0], AnnConfig(nprobe=10, ef_centroid=16, ef_list=32, k=5, per_cluster_k=10))
     assert r.n_flat_clusters_scanned == r.n_cluster_loads
     assert r.n_dist_modeled == idx.probe(base[0], AnnConfig(10, 16, 32, 5, 10)).n_dist_modeled
+
+
+# ---------------------------------------------------------------------------
+# build parameters that change the artifact must change the hash
+# ---------------------------------------------------------------------------
+def test_kmeans_settings_are_part_of_the_config_hash() -> None:
+    """Two materially different partitions must not share one artifact address."""
+    from smartann.config import config_hash
+
+    a = IndexBuildConfig(dataset="sift1m")
+    assert config_hash(a) != config_hash(IndexBuildConfig(dataset="sift1m", kmeans_n_init=3))
+    assert config_hash(a) != config_hash(
+        IndexBuildConfig(dataset="sift1m", kmeans_batch_size=32768)
+    )
+
+
+def test_kmeans_defaults_are_the_measured_ones() -> None:
+    """ADR-0022: 88x faster than the original defaults for 0.59% worse inertia."""
+    cfg = IndexBuildConfig(dataset="x")
+    assert cfg.kmeans_batch_size == "auto"  # resolves to 10 * nc
+    assert cfg.kmeans_n_init == 1
+
+
+def test_meta_records_the_resolved_kmeans_settings(tmp_path: Path) -> None:
+    """An index must be self-describing without its config file."""
+    out = IndexPaths(tmp_path / "k")
+    res = build_ecovector(
+        _corpus(300),
+        dataset="s",
+        space="l2",
+        nc=10,
+        m=8,
+        ef_construction=64,
+        min_graph_size=20,
+        seed=1,
+        config_hash="h",
+        out=out,
+        kmeans_batch_size=512,
+        kmeans_n_init=2,
+        quiet=True,
+    )
+    assert "batch_size=512" in res.meta.kmeans_algorithm
+    assert "n_init=2" in res.meta.kmeans_algorithm
+
+
+def test_auto_batch_size_resolves_to_ten_times_nc() -> None:
+    a = fit_partition(_corpus(400), nc=15, space="l2", seed=3, batch_size="auto")
+    b = fit_partition(_corpus(400), nc=15, space="l2", seed=3, batch_size=150)
+    np.testing.assert_array_equal(a.assignments, b.assignments)
+
+
+def test_force_rebuild_clears_stale_cluster_files(tmp_path: Path) -> None:
+    """A cluster that flips graph->flat leaves a stale .bin that bytes_on_disk counts."""
+    import shutil
+
+    out = IndexPaths(tmp_path / "idx")
+    build_ecovector(
+        _corpus(300),
+        dataset="s",
+        space="l2",
+        nc=10,
+        m=8,
+        ef_construction=64,
+        min_graph_size=20,
+        seed=1,
+        config_hash="h",
+        out=out,
+        quiet=True,
+    )
+    stale = out.clusters / "09999.bin"
+    stale.write_bytes(b"stale artifact from an earlier build")
+    assert stale.exists()
+
+    shutil.rmtree(out.root)  # what `index build --force` now does
+    build_ecovector(
+        _corpus(300),
+        dataset="s",
+        space="l2",
+        nc=10,
+        m=8,
+        ef_construction=64,
+        min_graph_size=20,
+        seed=1,
+        config_hash="h",
+        out=out,
+        quiet=True,
+    )
+    assert not stale.exists(), "a rebuild must not inherit files from the previous build"

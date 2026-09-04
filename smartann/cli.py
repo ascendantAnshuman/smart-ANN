@@ -8,6 +8,7 @@ plausible return value, and each one has a matching line in ``TODO.md``.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -433,6 +434,11 @@ def index_build(
     if out.meta.exists() and not force:
         typer.echo(f"{out.root} exists; pass --force to rebuild.")
         return
+    if out.root.exists():
+        # Clear rather than overwrite. A cluster that changes from graph to flat
+        # leaves a stale .bin beside the new .npz -- never loaded, but counted in
+        # bytes_on_disk, which is one of the numbers the paper reports.
+        shutil.rmtree(out.root)
 
     # The metric is read here and asserted, not declared alongside the build
     # parameters. Two sources of truth for the space is the bug that silently
@@ -470,6 +476,8 @@ def index_build(
             config_hash=chash,
             out=out,
             index_variant=cfg.index_variant,
+            kmeans_batch_size=cfg.kmeans_batch_size,
+            kmeans_n_init=cfg.kmeans_n_init,
         ).meta
 
     typer.echo(

@@ -70,6 +70,12 @@ class IndexBuildConfig:
     min_graph_size: int = 32
     seed: int = 42
     index_variant: str = "ecovector"  # ecovector | flat_hnsw | ivf_disk
+    # k-means settings live here, and therefore in the config hash, because they
+    # change the artifact. Leaving them as function defaults would let two
+    # materially different partitions share one hash -- exactly the collision
+    # the hash exists to prevent (Section 3 rule 4).
+    kmeans_batch_size: int | str = "auto"  # "auto" -> 10 * nc, per sklearn guidance
+    kmeans_n_init: int = 1
 
 
 @dataclass(frozen=True)

@@ -15,16 +15,18 @@ import itertools
 import os
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import psutil
 
 from smartann.bench.metrics import recall_at_k_batch, tie_rate
-from smartann.config import resolve_paths
+from smartann.config import config_hash, load_yaml, resolve_paths
 from smartann.data.readers import load_ground_truth, load_processed
+from smartann.data.registry import spec_for
 from smartann.index.baselines import FlatHnswIndex, compare_note
 from smartann.index.ecovector import EcoVectorIndex, _anon_mb
-from smartann.index.storage import IndexMeta, IndexPaths, memory_model_mb
+from smartann.index.storage import IndexBuildConfig, IndexMeta, IndexPaths, memory_model_mb
 from smartann.types import AnnConfig
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -44,17 +46,25 @@ def report(name: str, passed: bool, detail: str) -> None:
     print(f"[{'PASS' if passed else 'FAIL'}] {name}{chr(10)}       {detail}{chr(10)}", flush=True)
 
 
+CONFIG_DIR = Path("configs/index")
+
+
 def index_root(dataset: str, variant: str) -> IndexPaths | None:
-    """Newest built index of *variant* for *dataset*, or None."""
-    root = resolve_paths().data_root / "index" / dataset
-    if not root.exists():
+    """The index built from configs/index/<dataset>_<variant>.yaml, or None.
+
+    Derived from the config rather than discovered on disk. Picking the
+    lexicographically largest hash, or even the newest mtime, means the
+    acceptance numbers silently describe whichever artifact happened to sort or
+    land last -- which is fine until the first --force rebuild and wrong
+    thereafter, with no symptom. The config file is what the build was told to
+    do, so it is what the check should ask about.
+    """
+    cfg_path = CONFIG_DIR / f"{dataset}_{variant}.yaml"
+    if not cfg_path.exists():
         return None
-    found = []
-    for child in sorted(root.iterdir()):
-        meta = child / "meta.json"
-        if meta.exists() and IndexMeta.from_json(meta).index_variant == variant:
-            found.append(child)
-    return IndexPaths(found[-1]) if found else None
+    cfg = load_yaml(cfg_path, IndexBuildConfig)
+    root = resolve_paths().data_root / "index" / dataset / config_hash(cfg)
+    return IndexPaths(root) if (root / "meta.json").exists() else None
 
 
 def load_all(dataset: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -85,7 +95,10 @@ def check1a_exhaustive_equivalence(dataset: str = "sift1m", n_sub: int = 10_000)
     paths = resolve_paths()
     base = np.asarray(load_processed(paths.processed / dataset, "base"))[:n_sub]
     queries = np.asarray(load_processed(paths.processed / dataset, "queries"))[:50]
-    space = "l2" if dataset == "sift1m" else "ip"
+    # From the registry, like every other call site. A literal here would be a
+    # second source of truth for exactly the thing IndexBuildConfig refuses to
+    # carry -- and it would be wrong the moment a dataset changed metric.
+    space = spec_for(dataset).search_space
 
     out = IndexPaths(paths.data_root / "index" / f"_check1a_{dataset}")
     res = build_ecovector(

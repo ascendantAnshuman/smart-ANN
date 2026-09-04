@@ -656,3 +656,64 @@ cost was that only luck surfaced it.
 is correct — nothing is prepared. The Phase 0 test that asserted exit 0 on an
 empty root was updated to assert exit 1 plus a rendered table; its real intent
 was "does not crash", which still holds.
+
+---
+
+## ADR-0022 — k-means settings chosen by measurement: `batch_size=10*nc`, `n_init=1`
+
+**Status.** Accepted (Phase 2).
+
+**Context.** The first SQuAD build spent **295 s of its 366 s in k-means**, on
+46,369 vectors with nc=215. Extrapolated to SIFT1M at nc=2000 that is hours per
+build, and there are six builds. Before making it faster, the question was what
+the slowness was buying -- inertia is the k-means objective and the thing that
+governs cluster-miss error, so the trade had to be measured against it rather
+than against wall-clock alone.
+
+**Measurement.** SQuAD, 46,369 x 384, nc=215, fixed `random_state=42`:
+
+```
+  batch    n_init    inertia   relative      sec
+   4096         3     8604.7    1.0040x    412.4
+   4096         1     8570.2    1.0000x    207.2
+   2150 (10*nc) 1     8620.4    1.0059x      4.7
+  32768         1     8600.9    1.0036x     38.3
+  65536         1     8607.6    1.0044x     34.1
+```
+
+**Two findings.**
+
+1. **The entire inertia spread is 0.59%**, while wall-clock spans 88x. Every one
+   of these partitions is, for practical purposes, the same partition. There is
+   no quality being bought by the slow settings.
+
+2. **`n_init=1` beat `n_init=3` on both time and inertia** (207 s / 8570.2
+   versus 412 s / 8604.7), which looks impossible until you read what `n_init`
+   does in this estimator. `MiniBatchKMeans` does not run the full fit `n_init`
+   times and keep the best; it evaluates candidate *initialisations* on a
+   subsample and keeps the one with the lowest inertia there, then fits once.
+   A start that looks best on a subsample can converge worse on the full data,
+   which is exactly what happened. More inits is not more search -- it is a
+   different, noisier way of picking one start.
+
+**Why the small batch is the fast one.** `max_no_improvement=10` counts
+*mini-batches* without improvement in the smoothed inertia. Smaller batches
+accumulate that counter far sooner in wall-clock terms, so convergence is
+detected earlier. The larger batches are not doing better work, only more of it
+before noticing they are done.
+
+**Decision.** `kmeans_batch_size="auto"` resolving to `10 * nc` (sklearn's own
+guidance), `kmeans_n_init=1`. Both live on `IndexBuildConfig`, and therefore in
+the config hash, because they change the artifact: leaving them as function
+defaults would let two materially different partitions share one hash, which is
+the collision the hash exists to prevent (Section 3, rule 4). The resolved
+values are also written into `meta.json` as `kmeans_algorithm`, so an index is
+self-describing without its config.
+
+**Caveat, stated rather than buried.** Inertia is a proxy for what actually
+matters, which is recall on the built index. It is the right proxy -- it is the
+objective k-means optimises and it maps directly onto cluster-miss error -- but
+a 0.59% inertia spread was not separately confirmed to be a negligible recall
+difference. It is small relative to the recall effects Phase 2 measures (the M
+sweep moved recall by 3-6 points), so the risk of it mattering is low, and
+acceptance check 1b measures real recall on the artifact these settings produce.
