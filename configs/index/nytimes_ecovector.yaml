@@ -1,0 +1,7 @@
+dataset: nytimes
+nc: auto
+m: 32
+ef_construction: 200
+min_graph_size: 32
+seed: 42
+index_variant: ecovector

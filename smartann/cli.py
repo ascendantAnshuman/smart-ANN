@@ -407,19 +407,130 @@ def data_gt_dists(
     _write_gt_dists(name, spec, out_dir, base, queries, neighbors, paths_cfg)
 
 
-# ---------------------------------------------------------------------------
-# not yet implemented -- see TODO.md
-# ---------------------------------------------------------------------------
 @index_app.command("build")
-def index_build(config: Path = typer.Argument(...)) -> None:
-    """Build an EcoVector index from an index config."""
-    raise NotImplementedError("Phase 2: EcoVector index build is not implemented yet.")
+def index_build(
+    config: Path = typer.Argument(..., help="Path to an index build config YAML."),
+    force: bool = typer.Option(False, "--force", help="Rebuild even if the artifact exists."),
+) -> None:
+    """Build an index. The metric comes from the dataset registry, never the config."""
+    from smartann.config import config_hash, load_yaml
+    from smartann.data.readers import load_processed
+    from smartann.data.registry import spec_for
+    from smartann.index.baselines import FLAT_EVERYTHING, build_flat_hnsw
+    from smartann.index.builder import build_ecovector
+    from smartann.index.storage import IndexBuildConfig, IndexPaths
+
+    cfg = load_yaml(config, IndexBuildConfig)
+    spec = spec_for(cfg.dataset)
+    paths_cfg = resolve_paths()
+    processed = paths_cfg.processed / cfg.dataset
+
+    base = load_processed(processed, "base", mmap=False)
+    nc = spec.resolve_nc(base.shape[0]) if cfg.nc == "auto" else int(cfg.nc)
+    chash = config_hash(cfg)
+    out = IndexPaths.for_build(paths_cfg.data_root / "index", cfg.dataset, chash)
+
+    if out.meta.exists() and not force:
+        typer.echo(f"{out.root} exists; pass --force to rebuild.")
+        return
+
+    # The metric is read here and asserted, not declared alongside the build
+    # parameters. Two sources of truth for the space is the bug that silently
+    # halves recall (ADR-0010).
+    space = spec.search_space
+    typer.echo(
+        f"building {cfg.index_variant} for {cfg.dataset}: {base.shape[0]:,}x{base.shape[1]} "
+        f"space={space} nc={nc} M={cfg.m} efC={cfg.ef_construction} hash={chash}"
+    )
+
+    if cfg.index_variant == "flat_hnsw":
+        meta = build_flat_hnsw(
+            base,
+            dataset=cfg.dataset,
+            space=space,
+            m=cfg.m,
+            ef_construction=cfg.ef_construction,
+            seed=cfg.seed,
+            config_hash=chash,
+            out=out,
+        )
+    else:
+        # ivf_disk is the same build with every cluster flat, so the ablation
+        # holds partition, files and load path fixed by construction.
+        min_graph = FLAT_EVERYTHING if cfg.index_variant == "ivf_disk" else cfg.min_graph_size
+        meta = build_ecovector(
+            base,
+            dataset=cfg.dataset,
+            space=space,
+            nc=nc,
+            m=cfg.m,
+            ef_construction=cfg.ef_construction,
+            min_graph_size=min_graph,
+            seed=cfg.seed,
+            config_hash=chash,
+            out=out,
+            index_variant=cfg.index_variant,
+        ).meta
+
+    typer.echo(
+        f"built in {meta.build_seconds:.1f}s  peak build RSS {meta.build_peak_rss_mb:.0f} MB  "
+        f"{meta.build_workers} workers  {_fmt_bytes(meta.bytes_on_disk)} on disk"
+    )
+    typer.echo(
+        f"  clusters: {meta.n_graph_clusters} graph, {meta.n_flat_clusters} flat, "
+        f"{meta.n_empty_clusters} empty; largest {meta.largest_cluster:,}, "
+        f"smallest non-empty {meta.smallest_nonempty_cluster:,}; "
+        f"{meta.n_duplicate_centroids} duplicate centroid(s)"
+    )
+    typer.echo(f"  {out.root}")
 
 
 @index_app.command("info")
-def index_info(name: str = typer.Argument(...)) -> None:
-    """Print index metadata and the predicted memory model."""
-    raise NotImplementedError("Phase 2: EcoVector index build is not implemented yet.")
+def index_info(root: Path = typer.Argument(..., help="Path to a built index directory.")) -> None:
+    """Print index metadata and the predicted memory model (Section 3.4)."""
+    from smartann.index.storage import IndexMeta, IndexPaths, memory_model_mb
+
+    paths = IndexPaths(root)
+    if not paths.meta.exists():
+        raise typer.BadParameter(f"no index at {root} (meta.json missing)")
+    meta = IndexMeta.from_json(paths.meta)
+
+    typer.echo(f"{meta.index_variant}  {meta.dataset}  hash={meta.config_hash}")
+    for key in (
+        "space",
+        "dim",
+        "n_base",
+        "nc",
+        "m",
+        "ef_construction",
+        "min_graph_size",
+        "seed",
+        "kmeans_algorithm",
+        "built_at",
+        "build_seconds",
+        "build_peak_rss_mb",
+        "build_workers",
+        "n_graph_clusters",
+        "n_flat_clusters",
+        "n_empty_clusters",
+        "largest_cluster",
+        "smallest_nonempty_cluster",
+        "n_duplicate_centroids",
+    ):
+        typer.echo(f"  {key:26s} {getattr(meta, key)}")
+    typer.echo(f"  {'bytes_on_disk':26s} {_fmt_bytes(meta.bytes_on_disk)}")
+
+    if meta.nc:
+        typer.echo("\npredicted resident footprint (Section 3.4), MB:")
+        for term, mb in memory_model_mb(
+            meta.nc, meta.dim, meta.n_base, meta.largest_cluster, meta.m
+        ).items():
+            typer.echo(f"  {term:26s} {mb:10.3f}")
+
+
+# ---------------------------------------------------------------------------
+# not yet implemented -- see TODO.md
+# ---------------------------------------------------------------------------
 
 
 @run_app.command("experiment")

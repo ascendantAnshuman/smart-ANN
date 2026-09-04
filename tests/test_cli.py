@@ -28,8 +28,6 @@ EXPECTED_SUBCOMMANDS = ["version", "paths", "data", "index", "config", "run", "f
 # Anything removed from this list must gain real coverage below, and
 # tests/conftest.py now isolates the data roots regardless.
 STUBS = [
-    ["index", "build", "x.yaml"],
-    ["index", "info", "sift1m"],
     ["run", "experiment", "E1.yaml"],
     ["figures", "make", "E1"],
 ]
@@ -144,3 +142,27 @@ def test_data_prepare_rejects_an_unknown_dataset() -> None:
     result = runner.invoke(app, ["data", "prepare", "not-a-dataset"])
     assert result.exit_code != 0
     assert isinstance(result.exception, KeyError)
+
+
+# ---------------------------------------------------------------------------
+# index subcommands (implemented in Phase 2)
+# ---------------------------------------------------------------------------
+def test_index_info_rejects_a_directory_with_no_index(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    result = runner.invoke(app, ["index", "info", str(tmp_path)])
+    assert result.exit_code != 0
+    assert "meta.json missing" in result.output
+
+
+def test_index_build_rejects_an_unknown_dataset(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text("dataset: not_a_dataset\n", encoding="utf-8")
+    result = runner.invoke(app, ["index", "build", str(cfg)])
+    assert result.exit_code != 0
+
+
+def test_index_build_config_has_no_space_key(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Declaring the metric beside the build parameters is the two-sources bug."""
+    cfg = tmp_path / "withspace.yaml"
+    cfg.write_text("dataset: sift1m\nspace: l2\n", encoding="utf-8")
+    result = runner.invoke(app, ["index", "build", str(cfg)])
+    assert result.exit_code != 0

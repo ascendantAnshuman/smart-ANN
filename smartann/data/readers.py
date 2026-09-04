@@ -17,12 +17,15 @@ from smartann.data.registry import DatasetSpec
 
 __all__ = [
     "AnnDataset",
+    "DISTANCE_CONVENTIONS",
     "DuplicateReport",
+    "GroundTruth",
     "ZeroNormError",
     "ZeroNormReport",
     "drop_zero_norm_rows",
     "duplicate_report",
     "l2_normalize",
+    "load_ground_truth",
     "load_processed",
     "read_ann_benchmarks_hdf5",
     "read_fvecs",
@@ -275,9 +278,7 @@ def l2_normalize(x: np.ndarray, name: str = "vectors") -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Processed artifacts
 # ---------------------------------------------------------------------------
-def load_processed(
-    processed_dir: str | Path, split: str, mmap: bool = True
-) -> np.ndarray:
+def load_processed(processed_dir: str | Path, split: str, mmap: bool = True) -> np.ndarray:
     """Load ``base.npy`` / ``queries.npy`` / ``groundtruth_top100.npy``.
 
     Memory-mapped by default: SIFT1M's base array is 512 MB and is opened by
@@ -287,6 +288,7 @@ def load_processed(
         "base": "base.npy",
         "queries": "queries.npy",
         "groundtruth": "groundtruth_top100.npy",
+        "groundtruth_dists": "groundtruth_dists_top100.npy",
     }.get(split)
     if filename is None:
         raise KeyError(f"unknown split {split!r}; expected base, queries or groundtruth")
@@ -296,3 +298,56 @@ def load_processed(
         raise FileNotFoundError(f"{path} not prepared yet")
     arr: np.ndarray = np.load(path, mmap_mode="r" if mmap else None)
     return arr
+
+
+@dataclass(frozen=True)
+class GroundTruth:
+    """Neighbour ids and their distances, with the units they are stored in."""
+
+    ids: np.ndarray  # (n_queries, depth) int32
+    dists: np.ndarray  # (n_queries, depth) float64, smaller is better
+    convention: str
+    depth: int
+
+
+# The distance conventions smartann.bench.metrics can interpret. Both are
+# "smaller is better"; the metrics module has no space parameter precisely
+# because that is uniform (ADR-0018), so this is where the assumption is
+# checked rather than assumed.
+DISTANCE_CONVENTIONS = frozenset({"squared_l2", "one_minus_ip"})
+
+
+def load_ground_truth(
+    processed_dir: str | Path, data_root: str | Path, mmap: bool = True
+) -> GroundTruth:
+    """Load ground truth and *verify* the convention its distances are in.
+
+    The metrics take no ``space`` argument, which is only safe while every
+    dataset stores distances the same way. That holds today and is asserted
+    here rather than assumed, because the stretch datasets (HotpotQA, TriviaQA)
+    have not been prepared and a future reader that stored raw similarities
+    would invert every ranking with no symptom.
+    """
+    from smartann.data.manifest import DataManifest
+
+    processed_dir = Path(processed_dir)
+    ids = load_processed(processed_dir, "groundtruth", mmap=mmap)
+    dists = load_processed(processed_dir, "groundtruth_dists", mmap=mmap)
+    if ids.shape != dists.shape:
+        raise ValueError(f"ground truth ids {ids.shape} and distances {dists.shape} disagree")
+
+    entry = DataManifest(data_root).get(processed_dir / "groundtruth_dists_top100.npy")
+    if entry is None:
+        raise ValueError(
+            f"{processed_dir / 'groundtruth_dists_top100.npy'} has no manifest entry, so its "
+            "distance convention is unknown. Run `smartann data gt-dists <dataset>`."
+        )
+    convention = entry.get("extra", {}).get("dists_convention")
+    if convention not in DISTANCE_CONVENTIONS:
+        raise ValueError(
+            f"ground truth is recorded as {convention!r}, which is not one of "
+            f"{sorted(DISTANCE_CONVENTIONS)}. smartann.bench.metrics assumes distances where "
+            "smaller is better; a similarity convention would invert every ranking silently."
+        )
+
+    return GroundTruth(ids=ids, dists=dists, convention=str(convention), depth=int(ids.shape[1]))

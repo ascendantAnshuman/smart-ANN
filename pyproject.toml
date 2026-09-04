@@ -116,6 +116,7 @@ module = [
     "sklearn.*",
     "scipy.*",
     "h5py",
+    "hnswlib",
     "pysbd",
     "sentence_transformers.*",
 ]
