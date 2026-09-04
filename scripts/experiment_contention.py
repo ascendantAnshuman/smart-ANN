@@ -156,6 +156,11 @@ def main() -> int:
     ap.add_argument("--burners", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--out", default=None)
     ap.add_argument(
+        "--contention-evidence",
+        default=None,
+        help="JSON file holding the burner verification table, copied into the manifest.",
+    )
+    ap.add_argument(
         "--mode",
         choices=("contention", "target-step"),
         default="contention",
@@ -187,14 +192,36 @@ def main() -> int:
     out_root = Path(args.out) if args.out else paths.results_root / f"E_DEMO_{args.mode}"
     out_root.mkdir(parents=True, exist_ok=True)
 
+    contention_evidence = None
+    if args.contention_evidence:
+        contention_evidence = json.loads(Path(args.contention_evidence).read_text("utf-8"))
+
     print(f"=== tuning the static baseline on {args.dataset}, quiet ===", flush=True)
     tuning = tune_static(index, queries, gt_ids, gt_dists, candidates=(4, 8, 16, 32, 64))
 
-    # Target at ~1.5x the best quiet p95, so a tuned static config sits inside
-    # the budget when idle and outside it when contended. Fixed HERE, before the
-    # contention run, and not touched afterwards.
-    best_npb, best_p95, _best_recall, _ = max(tuning, key=lambda r: r[0])
-    target_ms = 1.5 * best_p95
+    # The target must NOT depend on which config is then selected, or selection
+    # is circular: whatever is picked meets the target by construction because
+    # the target came from it. An earlier version did exactly that -- it took
+    # max(key=nprobe), which unconditionally returns the largest candidate, and
+    # derived the target from that same row. Anchor on the MEDIAN candidate
+    # instead, so the target is a property of the sweep rather than of the
+    # winner, and the selection below has real losers.
+    by_nprobe = sorted(tuning, key=lambda r: r[0])
+    anchor = by_nprobe[len(by_nprobe) // 2]
+    target_ms = 1.5 * anchor[1]
+
+    # NOW apply the rule: the largest nprobe whose quiet p95 fits the target.
+    # That is the most recall a static config can buy while meeting its SLO with
+    # nothing wrong -- the strongest honest baseline, since a static policy
+    # cannot know contention is coming.
+    eligible = [r for r in by_nprobe if r[1] <= target_ms]
+    if not eligible:
+        raise RuntimeError(
+            f"no candidate meets the {target_ms:.2f} ms target derived from the median "
+            f"candidate (nprobe={anchor[0]}, p95={anchor[1]:.2f} ms). Widen the sweep."
+        )
+    best_npb, best_p95, _best_recall, _ = eligible[-1]
+    rejected = [r[0] for r in by_nprobe if r[1] > target_ms]
     aimd_cfg = AimdConfig(
         nprobe_min=1,
         nprobe_max=64,
@@ -205,11 +232,15 @@ def main() -> int:
         effort_init=1.0,
     )
     note = (
-        f"static nprobe={best_npb} chosen as the largest candidate whose quiet p95 "
-        f"({best_p95:.2f} ms) is met by the target; target = 1.5 * that = {target_ms:.2f} ms. "
-        f"AIMD parameters and target fixed before the disturbance run and unchanged after. "
-        f"NOTE: RollingWindow(size=50) is a DEFAULT, not a pre-registered choice -- it was "
-        f"not selected from data, unlike the target and the AIMD constants."
+        f"Target = 1.5 x the quiet p95 of the MEDIAN swept candidate "
+        f"(nprobe={anchor[0]}, p95={anchor[1]:.2f} ms) = {target_ms:.2f} ms. The target is "
+        f"anchored on the median rather than on the winner so that selection is not "
+        f"circular. Static baseline = the largest nprobe whose quiet p95 fits that target: "
+        f"nprobe={best_npb} at {best_p95:.2f} ms; rejected for exceeding it: {rejected}. "
+        f"Target and AIMD constants were derived from quiet-phase data BEFORE the "
+        f"disturbance run and were not changed after. "
+        f"RollingWindow(size=50) is a DEFAULT, not pre-registered -- it was never selected "
+        f"from data, unlike the target and the AIMD constants."
     )
     print(f"\n  {note}\n", flush=True)
 
@@ -312,6 +343,7 @@ def main() -> int:
                 "tuning_note": note,
                 "latency_target_ms": target_ms,
                 "burners": args.burners,
+                "contention_verification": contention_evidence,
                 "phase_seconds": {
                     "quiet": args.quiet_s,
                     "contended": args.contended_s,

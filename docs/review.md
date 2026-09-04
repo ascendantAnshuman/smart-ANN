@@ -10,35 +10,50 @@ simulator, a placeholder, or a model presented as a measurement.
 
 ## 1. What the process caught
 
-Six defects, each caught before it produced a reported number.
+Eight defects, each caught before it produced a reported number.
 
-**Ranked by danger, which is not the same as severity.** The ordering below is
-by how likely each was to survive undetected, and the most dangerous is not the
-one that would have been most wrong.
+**Ranked by danger, which is not the same as severity** — by how likely each was
+to survive undetected, not by how wrong it would have been.
 
 | # | Defect | Why it ranks here |
 |---|---|---|
 | 1 | **Check 4 compared an index with itself and reported PASS** | A broken *measurement* gets caught by a check. A broken *check* catches nothing, including itself, and reports a green line in a summary table -- precisely the line nobody re-reads. |
-| 2 | `compute_topk` dropped `‖q‖²` from its L2 expression | Every stored ground-truth distance off by a per-query constant. Score-equality recall would have compared against a meaningless threshold and produced a *plausible* number. Every ordering test the module had already passed. |
-| 3 | Timing harness ran variants in blocks | Reported a 3x spread between two configs doing provably identical work. Machine drift presented as a performance result, and it looked like one. |
-| 4 | `n_dist_modeled` was uncapped `ef·M` | Modelled work overstated by up to **29.5x**, on the field Phase 3 regresses its cost model against. |
-| 5 | `decide()` called twice per query | AIMD would have halved effort twice per overshoot, and `controller_overhead_us` would have measured only the second call -- an over-aggressive controller and an understated overhead, both readable as findings. |
-| 6 | Burners contended for ALU, not memory bandwidth | The query path is a scan over mmap'd arrays. The experiment would have applied almost no pressure and "the controller did not react" would have looked like a result about the controller. |
+| 2 | **The static baseline was not being tuned, and the manifest said it was** | `max(key=nprobe)` returns the largest candidate unconditionally, and the latency target was then derived from that same config -- so the selection met the target by construction. The number was recoverable; the manifest's description of the method was not. A run record that misdescribes its own method is worse than a wrong number, because the description is what a reader trusts when they cannot re-derive. |
+| 3 | `compute_topk` dropped `‖q‖²` from its L2 expression | Every stored ground-truth distance off by a per-query constant. Score-equality recall would have compared against a meaningless threshold and produced a *plausible* number. Every ordering test the module had already passed. |
+| 4 | Timing harness ran variants in blocks | Reported a 3x spread between two configs doing provably identical work. Machine drift presented as a performance result, and it looked like one. |
+| 5 | `n_dist_modeled` was uncapped `ef·M` | Modelled work overstated by up to **29.5x**, on the field Phase 3 regresses its cost model against. |
+| 6 | `decide()` called twice per query | AIMD would have halved effort twice per overshoot, and `controller_overhead_us` would have measured only the second call -- an over-aggressive controller and an understated overhead, both readable as findings. |
+| 7 | Burners contended for ALU, not memory bandwidth | The query path is a scan over mmap'd arrays. The experiment would have applied almost no pressure, and "the controller did not react" would have looked like a result about the controller. |
+| 8 | Fork bomb: a script starting worker processes without a `__main__` guard | Windows `spawn` re-imports the parent module in every child, so each child re-ran the whole script recursively. Fixed *inside* `Burners.start()`, which now refuses to launch from an unguarded module -- fixing only the script would have left the trap armed for the next caller. |
 
-**The transferable point is what caught the dangerous ones.** Not the test suite:
+### Three detection mechanisms, and what each costs
 
-- `‖q‖²` — comparison against the **published ground truth shipped in the HDF5**
-- the blocked harness — an **independent interleaved control**
-- uncapped `ef·M` — **arithmetic against the physical containment ceiling**
+The eight did not fall to one method, and the differences are the point.
 
-None of the three was caught by an acceptance threshold. Each was caught by
+- **Caught by loud failure** (#8). Free. The failure announced itself; the
+  machine fell over and there was nothing to notice.
+- **Caught by looking** (#1, #2, #6, #7). Cheap, but depends on someone reading
+  the right lines on the right day. Four of eight, which is not a system.
+- **Caught by external reference** (#3, #4, #5). The expensive category, and the
+  **only one that catches errors producing plausible numbers**:
+  - `‖q‖²` — against the **published ground truth shipped in the HDF5**
+  - the blocked harness — against an **independent interleaved control**
+  - uncapped `ef·M` — against the **physical containment ceiling**
+
+None of those three was caught by an acceptance threshold. Each was caught by
 checking the number against something *outside the system that produced it*.
 
-That generalises, and it is a better methods claim than a test count: **a test
-suite validates a system against its own assumptions, so the errors that survive
-are exactly the ones the assumptions share.** Published reference data, an
-independent control, and a physical bound are the three kinds of external check
-available here, and all three earned their place.
+**The ordering is itself the finding: the cost of detection is inversely
+proportional to how loudly a defect fails.** A fork bomb costs minutes. A recall
+metric quietly off by a per-query constant costs however long it takes someone
+to distrust a number that looks fine — and on this project, three separate
+external references were needed to find three such numbers.
+
+That generalises better than a test count: **a test suite validates a system
+against its own assumptions, so the errors that survive are exactly the ones the
+assumptions share.** Published reference data, an independent control, and a
+physical bound are the three external checks available here, and all three
+earned their place.
 
 ## 2. What is built
 
@@ -156,6 +171,28 @@ failure stays visible.
 ---
 
 ## 6. The adaptive mechanism
+
+**The disturbance was verified before anything was built on it.** "We applied
+contention" is a claim; this is its evidence. Requirement: contended p95 at least
+2x quiet p95.
+
+| burners | total mem | p50 (ms) | p95 (ms) | p95 ratio |
+|---|---|---|---|---|
+| quiet | — | 16.95 | 26.02 | — |
+| 11 | 3.0 GB | 92.84 | 137.39 | **5.28x** |
+| 12 | 3.0 GB | 93.78 | 151.00 | **5.80x** |
+| 24 | 3.0 GB | 179.55 | 254.94 | **9.80x** |
+
+The burners **stream through a large buffer** rather than spinning on
+floating-point adds. That distinction decided the experiment: the query path is a
+brute-force scan over memory-mapped flat arrays and is memory-bandwidth bound, so
+an ALU spin loop barely touches it.
+
+**12 burners were used, not 24.** 12 clears the bar at 5.80x; 24 consumes the
+host almost entirely, which would make the *recovery* phase unrepresentative --
+the machine would still be settling when the burners stop, and the third phase
+exists to show effort being restored against a quiet baseline.
+
 
 *(Populated from the contention experiment; see `results/figures/fig1_headline.png`.)*
 
