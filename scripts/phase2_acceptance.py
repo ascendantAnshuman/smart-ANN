@@ -139,9 +139,14 @@ def check1a_exhaustive_equivalence(dataset: str = "sift1m", n_sub: int = 10_000)
 
         idx = EcoVectorIndex.open(out.root)
         rep = check_equivalence(idx, base, queries, k=10)
-        del idx
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        # Windows will not delete a file while it is memory-mapped, and flat
+        # clusters are mapped (ADR-0029). Dropping the index and collecting
+        # before the rmtree releases the maps; ignore_errors would have hidden
+        # the failure and leaked one temp tree per acceptance run.
+        idx = None
+        gc.collect()
+        shutil.rmtree(tmp)
 
     report(
         f"1a. exhaustive equivalence ({dataset} {n_sub:,}-vector subset, nc=200)",

@@ -1372,3 +1372,71 @@ machine drift ADR-0030 documents. Interleaving equalises drift *between*
 variants within a row, which is what the comparison needs, but not *across*
 rows. The within-row ratios are the trustworthy quantity and they are stable at
 2.3-3.0x; the absolute column should not be quoted.
+
+---
+
+## ADR-0031 — The missing materialisation term, and a contradiction inside MobileRAG's design
+
+**Status.** Accepted. This is the sharpest form of the ADR-0028 finding and the
+one the paper section should be written around.
+
+**The dose-response confirms the model's mechanics.** Inside the condition, at
+`nc=250` on SIFT:
+
+| M | `ef_L · M'` | distance computations vs ivf_disk |
+|---|---|---|
+| 16 | 1024 | **4.0x fewer** |
+| 32 | 2048 | **2.0x fewer** |
+
+Halving `M` halves the distance computations, exactly as `ef_L · M'` predicts.
+MobileRAG's search-time model is *mechanically correct* about the quantity it
+counts. What it predicts from that quantity -- that EcoVector therefore wins --
+is false by 2.3-3.0x on wall-clock at every operating point measured.
+
+**The missing term, stated precisely.** The paper prices cluster access as pure
+I/O: `n_seek · (T_seek + T_cmd + n_byte · T_transfer)`. There is no term for
+turning bytes on disk into a *searchable* structure. That omission is not
+uniformly wrong -- it is exactly right for one storage format and badly wrong for
+another:
+
+* **Flat array**: the stored form *is* the traversable form. The materialisation
+  term is genuinely zero, and the paper's model is exact.
+* **HNSW graph**: the stored form must be parsed into nodes and link lists
+  before a single comparison happens. Measured at **95-99%** of access cost
+  (ADR-0026 amendment).
+
+**The contradiction is inside MobileRAG's own design, not between the paper and
+our build.** Section 3.2.3 requires unloading the cluster graph after every
+query -- that is what bounds the resident footprint, which is the paper's central
+claim. But an access model with no materialisation term is only valid if the
+serialised form is traversable in place. **Unload-per-query and pure-I/O access
+cost cannot both hold unless the on-disk format is directly searchable.** The
+memory design and the latency model contradict each other, and our measurement
+is where that contradiction surfaces.
+
+**The constructive version, which is the useful half.** A directly-traversable
+on-disk graph format would satisfy both requirements at once: unload-per-query
+keeps the footprint bounded, and zero materialisation makes the pure-I/O cost
+model correct. That is precisely why our mmap'd flat clusters win -- a flat array
+is traversable in place, so it already has the property the design needs.
+
+The finding is therefore not "graphs are bad". It is: **a format that must
+survive unload-per-query has to be traversable without materialisation, and
+hnswlib's serialisation is not.** An implementation with a mappable graph format
+could plausibly recover EcoVector's advantage, and that is a concrete direction
+rather than a complaint.
+
+**Scope of the instantiation caveat, now narrow.** The 2.3-3.0x wall-clock
+figure is hnswlib-specific. The *argument* is not: it follows from the paper's
+own equations plus the measured fact that materialisation is non-zero for any
+format requiring a parse. The distance-computation dose-response and the recall
+equivalence are implementation-independent.
+
+**A note on measurement quality that supports the method.** The `nprobe=4` row
+is non-monotonic in absolute time (132.94 ms against 101.23 ms at `nprobe=8`),
+and it moves that way for **all three variants simultaneously** -- a system
+disturbance during that block, not a variant effect. The eco/ivf ratios across
+the four rows are 2.62, 2.29, 2.91, 3.00: stable while the absolutes are
+visibly corrupted at one point. That is exactly what within-config interleaving
+is for (ADR-0030). The ratios are the result; the absolute column is
+drift-affected and is not quoted.
