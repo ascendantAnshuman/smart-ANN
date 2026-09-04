@@ -1624,3 +1624,55 @@ time -- ADR-0033 having reduced C1 to one dimension on its own. But C2's claim,
 "adaptive SCR aggressiveness improves the quality-cost trade-off", cannot be
 evaluated until a generator exists to measure quality. Until then C3 can be run
 as a cost-only study and must be labelled as one.
+
+---
+
+## ADR-0035 — SCR's applicability is a property of the chunking, not of the reducer
+
+**Status.** Accepted. Found by a smoke run before the real experiment, which is
+the only reason it is a configuration note rather than a wasted result.
+
+**What happened.** The first matrix smoke run reported **0.0% reduction** with
+SCR enabled, while still paying its full embedding cost -- 662 ms per query
+against 14.8 ms with SCR off. The reducer was not broken; it had nothing to work
+with.
+
+**Measured, not guessed.** Over 400 SQuAD chunks:
+
+```
+chunk length      p50 385 chars   p95 683
+sentences/chunk   p5 2   p50 3   p95 3   max 4
+fraction with <= 3 sentences: 0.993
+```
+
+At `sliding_window_size=3`, a 3-sentence chunk yields **exactly one window**, so
+"keep the top 2 windows" keeps everything. Reduction is zero by construction, and
+no threshold or extension setting can change that.
+
+**The general statement.** SCR selects *among* windows, so it can only reduce
+when a chunk contains more windows than are kept: `n_sentences > window_size`
+must hold with room to spare. Our Phase 1 chunking targets roughly 3-sentence
+chunks, and MobileRAG's SCR implicitly assumes chunks substantially larger than
+its windows. **The two were set independently and are incompatible at their
+defaults.**
+
+**Decision.** The experiment uses `window_size=2, overlap=0, top_windows=1,
+context_extension=0`, which yields two windows per chunk and a measured **~29%**
+reduction. The alternative -- larger chunks -- would change the index, the ground
+truth and every recall number already recorded, for a benefit that is
+unmeasurable until a generator exists.
+
+**Two consequences worth stating.**
+
+1. **A zero-reduction result would have looked like a null finding about SCR**
+   rather than a mismatch between two configurations. It would have been reported
+   as "adaptive SCR does not help", which is a claim about the contribution
+   rather than about the setup. Smoke-running before the real run is what
+   separated those.
+2. **SCR is expensive here, and that is a real measurement.** It embeds every
+   window of every retrieved chunk on the query path: with k=5 and two windows
+   per chunk that is ten forward passes through gte-small per query, costing
+   roughly 45x the retrieval it follows. On this corpus SCR does not trade a
+   little latency for fewer tokens; it trades a great deal of latency for ~29%
+   fewer tokens. Whether that trade is ever worth it depends on generation cost,
+   which Phase 7 would supply and cannot.
