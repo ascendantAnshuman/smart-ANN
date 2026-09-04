@@ -354,7 +354,7 @@ is written.
 | Thermal model, energy model, DVFS tiers | A device trace. This machine can measure neither temperature nor energy — WMI thermal zone is access-denied without elevation, there is no RAPL on Windows, and WSL2 exposes no populated `powercap`. The Android phone is the **only** source. |
 | Selective Content Reduction (C2) | Phase 5; the sentence splitter it shares with chunking is already built. |
 | Bandit policy, Pareto policy, safety shield | Phase 6, which needs the Phase 3 cost model. |
-| Answer generation, EM/F1 | Phase 7; `llama-cpp-python` needs the MSVC toolchain. |
+| Answer generation, EM/F1 | Phase 7. **Confirmed**: `llama-cpp-python` has no usable wheel for any version on CPython 3.12 / win-amd64, so it is a source build needing MSVC — and unlike hnswlib there is no differently-named redistribution to fall back on. |
 
 The energy and thermal dependency was **identified and recorded in Phase 1**
 (ADR-0007, ADR-0008), before any work was built on top of it — not discovered

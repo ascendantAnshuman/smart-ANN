@@ -3,8 +3,7 @@
   "run_at": "2026-09-04",
   "host": "Windows 11, i5-13420H, CPython 3.12.14",
   "device_reachable": false,
-  "device_reachable_evidence": "adb not on PATH ('adb: command not found'); no Android SDK platform-tools at C:/Users/HP/AppData/Local/Android/Sdk/platform-tools/. No device enumerated. Questions 1-5 and 7 must run ON the phone (Termux), which this session cannot reach.",
-
+  "device_reachable_evidence": "adb 37.0.1 installed and the daemon starts cleanly, but 'adb devices -l' lists nothing. The cause is upstream of adb: Get-PnpDevice shows NO Android device on USB at all -- no MTP, no portable device, no AndroidUsbDeviceClass entry, only HID controls and a Camera DFU device. A phone on a working data cable enumerates in Windows even with USB debugging DISABLED, so this is a cable/port/connection issue rather than a developer-options or authorisation issue.",
   "questions": {
     "1_hnswlib_builds_under_termux": {
       "verdict": "BLOCKED",
@@ -57,11 +56,23 @@
       "unblock": "Section 7 records charging state, percentage and battery temperature automatically; ambient temperature and physical setup must be written down by hand."
     }
   },
-
   "phase_3_5_decision": "CANNOT BE MADE YET. The decision turns entirely on questions 1 and 2, both of which are BLOCKED on device access rather than answered. Stating a scope now would be a guess presented as a finding, which is the failure mode this probe exists to prevent. scripts/device_probe.sh answers all seven in one run and is the only thing standing between here and the decision.",
-
   "what_is_already_certain": [
     "Phase 7 (generation) needs the MSVC toolchain: no llama-cpp-python wheel exists for cp312 win_amd64 at any version, and no alternative distribution exists.",
     "This development machine remains incapable of measuring temperature or energy (ADR-0007, ADR-0008), so the phone is still the only possible source regardless of what the probe returns."
+  ],
+  "toolchain_status": {
+    "adb_installed": true,
+    "adb_version": "1.0.41 / 37.0.1-15733141",
+    "adb_path": "C:/Users/HP/platform-tools/adb.exe",
+    "source": "https://dl.google.com/android/repository/platform-tools-latest-windows.zip (8.0 MB, official)",
+    "on_permanent_PATH": false,
+    "note": "Kept out of the user's permanent PATH deliberately; that is their call. Moved out of the session scratchpad so it survives."
+  },
+  "unblock_requires_physical_action": [
+    "Connect the phone with a DATA cable (charge-only cables produce exactly this symptom)",
+    "Enable USB debugging: Settings > About phone > tap Build number x7 > Developer options",
+    "Tap 'Allow USB debugging?' on the handset when it appears -- needs a physical tap, not a retry",
+    "Confirm which Termux build is installed: F-Droid or GitHub releases, NOT the Play Store build, whose pkg install is known to fail and would sink question 1 for reasons unrelated to hnswlib"
   ]
 }
