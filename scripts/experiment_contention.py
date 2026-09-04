@@ -156,6 +156,16 @@ def main() -> int:
     ap.add_argument("--burners", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--out", default=None)
     ap.add_argument(
+        "--control-period-s",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum wall-clock between AIMD effort changes. 0 reproduces the "
+            "once-per-query loop that collapsed. Any non-zero value used here must be "
+            "pre-declared (see docs/predeclared/)."
+        ),
+    )
+    ap.add_argument(
         "--contention-evidence",
         default=None,
         help="JSON file holding the burner verification table, copied into the manifest.",
@@ -230,6 +240,7 @@ def main() -> int:
         low_water=0.8,
         warmup_queries=20,
         effort_init=1.0,
+        control_period_s=args.control_period_s,
     )
     note = (
         f"Target = 1.5 x the quiet p95 of the MEDIAN swept candidate "
@@ -350,6 +361,10 @@ def main() -> int:
                     "recovery": args.recovery_s,
                 },
                 "aimd": aimd_cfg.__dict__ if name == "aimd" else None,
+                "control_period_s": args.control_period_s,
+                "predeclaration": (
+                    "docs/predeclared/control_period_test.json" if args.control_period_s else None
+                ),
                 "static_tuning": [
                     {"nprobe": r[0], "quiet_p95_ms": r[1], "recall": r[2], "n": r[3]}
                     for r in tuning

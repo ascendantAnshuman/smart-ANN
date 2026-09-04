@@ -40,6 +40,16 @@ class AimdConfig:
     low_water: float = 0.8  # increase only below low_water * target
     warmup_queries: int = 20  # decide nothing until the window is meaningful
     effort_init: float = 1.0  # start at full effort and back off, not the reverse
+    # Minimum wall-clock between effort CHANGES. 0.0 reproduces the original
+    # once-per-query behaviour, which is the configuration that collapsed.
+    #
+    # A control loop must not act faster than its own feedback arrives. The
+    # signal here is a p95 over the last `window` samples, so an action is
+    # invisible to it for `window` queries; acting every query means acting on
+    # up to `window` superseded decisions, and multiplicative decrease under
+    # that condition ratchets to the floor by construction. TCP paces cwnd once
+    # per RTT for exactly this reason -- the RTT is the feedback delay.
+    control_period_s: float = 0.0
 
 
 class AimdPolicy(Policy):
@@ -61,10 +71,12 @@ class AimdPolicy(Policy):
         self.scr = scr
         self.effort = cfg.effort_init
         self._seen = 0
+        self._last_action_t = 0.0
 
     def reset(self) -> None:
         self.effort = self.cfg.effort_init
         self._seen = 0
+        self._last_action_t = 0.0
 
     def _nprobe(self) -> int:
         """Map effort in [0,1] onto the nprobe range, monotonically.
@@ -85,12 +97,18 @@ class AimdPolicy(Policy):
 
         # Hold full effort until the rolling window means something. Reacting to
         # a two-sample p95 would be reacting to noise.
-        if self._seen > self.cfg.warmup_queries and state.history.queries_in_window > 0:
+        now = state.device.timestamp
+        warm = self._seen > self.cfg.warmup_queries and state.history.queries_in_window > 0
+        # Act no faster than the feedback arrives. With control_period_s = 0 this
+        # is the original once-per-query loop.
+        due = (now - self._last_action_t) >= self.cfg.control_period_s
+        if warm and due:
             if p95 > target:
                 self.effort *= self.cfg.multiplicative_decrease
             elif p95 < self.cfg.low_water * target:
                 self.effort += self.cfg.additive_increase
             self.effort = min(1.0, max(0.0, self.effort))
+            self._last_action_t = now
 
         return PipelineConfig(
             ann=AnnConfig(

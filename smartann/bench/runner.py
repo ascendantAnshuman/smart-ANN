@@ -117,6 +117,12 @@ def run_queries(
     if duration_s is None and max_queries is None:
         raise ValueError("give run_queries a duration_s or a max_queries bound")
 
+    # NOTHING ELSE MAY RUN WHILE THIS LOOP IS TIMING. Three separate runs in
+    # this project were silently corrupted by concurrent work -- twice by another
+    # experiment, once by this project's own figure generation, which perturbed
+    # the latencies it was plotting. Analysis and experiments are sequenced,
+    # never overlapped; scripts/phase2_acceptance.py enforces the same rule with
+    # assert_machine_quiet().
     window = window or RollingWindow()
     # The widest probe any decision could use, so one probe serves every choice.
     probe_ann = _widest_ann(policy, index)

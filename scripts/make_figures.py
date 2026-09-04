@@ -73,19 +73,22 @@ def _controller_p95(v, window: int = 50):
 def _rolling_p95(
     t: np.ndarray, v: np.ndarray, window_s: float = 3.0, stride: int = 1
 ) -> np.ndarray:
-    """p95 over a trailing time window, so the x-axis stays wall-clock.
+    """p95 over a trailing time window, in O(n) rather than O(n^2).
 
-    Evaluated every `stride` samples and held between, because the naive form is
-    O(n^2): a percentile over a growing slice for each of tens of thousands of
-    queries. That cost is not academic -- running it concurrently with an
-    experiment perturbed the very latencies the experiment was measuring, which
-    is how this was noticed.
+    Two pointers walk the array once and the window is re-sorted only over its
+    own contents, so cost is linear in samples rather than quadratic. The naive
+    form -- percentile over a growing slice at every step -- was not merely slow:
+    run concurrently with an experiment it perturbed the very latencies being
+    plotted (defect #10). Cheap analysis is a correctness property here, not a
+    convenience.
     """
     out = np.empty(v.size)
+    lo = 0
     last = 0.0
     for i in range(v.size):
+        while t[lo] < t[i] - window_s:
+            lo += 1
         if i % stride == 0:
-            lo = np.searchsorted(t, t[i] - window_s, side="left")
             last = float(np.percentile(v[lo : i + 1], 95))
         out[i] = last
     return out
