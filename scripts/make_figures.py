@@ -575,6 +575,88 @@ def fig_joint(joint_json, out) -> None:
     print(f"wrote {out}", flush=True)
 
 
+def fig_device(device_json, out) -> None:
+    """The two measurements taken on the handset rather than the laptop.
+
+    Left: power against retrieval work, binned into quintiles. Binned rather
+    than fitted, because the regression's intercept comes out NEGATIVE -- work
+    rate never approaches zero in the trace, so the intercept extrapolates far
+    outside the data (ADR-0052). Bins need no intercept and say only what was
+    observed.
+
+    Right: the thermal trace the Phase 4 model is fitted from, with the fitted
+    time constant annotated. tau is the number that decides whether a
+    thermally-aware controller can work at all: Phase 6 collapsed because its
+    control period was shorter than its observation delay, and this says the
+    thermal loop's delay is ~68 s.
+    """
+    import json as _json
+
+    d = _json.loads(device_json.read_text(encoding="utf-8"))
+    th = _json.loads((device_json.parent / "thermal_model.json").read_text(encoding="utf-8"))
+
+    q = d["effort_vs_power"]
+    m = d["measured"]
+    centres = [(x["work_lo"] + x["work_hi"]) / 2 for x in q["quintiles"]]
+    powers = [x["power_median_w"] for x in q["quintiles"]]
+
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+
+    ax.plot(centres, powers, "o-", color="#c1121f", lw=2, ms=8)
+    for x, y in zip(centres, powers, strict=True):
+        ax.annotate(
+            f"{y:.2f} W", (x, y), textcoords="offset points", xytext=(0, 9), ha="center", fontsize=8
+        )
+    ax.set_xlabel("retrieval work (clusters searched per second)")
+    ax.set_ylabel("median power (W)")
+    ax.set_title(
+        f"Energy: retrieval effort has a measurable price\n"
+        f"vivo I2304, {d['trace']['n_queries']:,} queries, "
+        f"{d['trace']['minutes']:.0f} min UNPLUGGED, r={q['correlation']:+.2f}",
+        fontsize=9,
+    )
+    ax.text(
+        0.03,
+        0.95,
+        f"total {m['total_energy_j']:.0f} J\nmean {m['mean_power_w']:.2f} W\n"
+        f"{m['mj_per_query_allin']:.0f} mJ/query all-in",
+        transform=ax.transAxes,
+        va="top",
+        fontsize=8,
+        bbox={"boxstyle": "round", "fc": "#fff3cd", "ec": "#999"},
+    )
+
+    t = th["temperature_observed"]
+    tau = th["derived"]["tau_seconds"]
+    levels = sorted(th["per_nprobe"], key=int)
+    lat = [th["per_nprobe"][n]["latency_p50_ms"] for n in levels]
+    ax2.plot([int(n) for n in levels], lat, "s-", color="#0353a4", lw=2, ms=7)
+    ax2.set_xscale("log", base=2)
+    ax2.set_yscale("log")
+    ax2.set_xlabel("nprobe (retrieval effort)")
+    ax2.set_ylabel("p50 latency on device (ms)")
+    ax2.set_title(
+        f"Latency on device, and the thermal limit\n"
+        f"skin {t['skin_min_c']:.1f} to {t['skin_max_c']:.1f} C, "
+        f"fitted tau = {tau:.0f} s",
+        fontsize=9,
+    )
+    ax2.text(
+        0.03,
+        0.95,
+        f"tau = {tau:.0f} s is the thermal\nobservation delay: a controller\n"
+        f"acting faster than this repeats\nthe Phase 6 collapse.",
+        transform=ax2.transAxes,
+        va="top",
+        fontsize=8,
+        bbox={"boxstyle": "round", "fc": "#d1ecf1", "ec": "#999"},
+    )
+
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"wrote {out}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", default=None, help="directory holding static/ and aimd/")
@@ -607,7 +689,15 @@ def main() -> int:
     # drew nothing on a default run -- no figure, no error, and the summary
     # reported success. A figure that is skipped by default is a figure nobody
     # will notice is missing.
-    all_figures = {"headline", "recall_effort", "footprint", "regime", "scr_quality", "joint"}
+    all_figures = {
+        "headline",
+        "recall_effort",
+        "footprint",
+        "regime",
+        "scr_quality",
+        "joint",
+        "device",
+    }
     wanted = set(args.only) if args.only else all_figures
     unknown = wanted - all_figures
     if unknown:
@@ -631,6 +721,7 @@ def main() -> int:
         ("regime", fig_regime, out.parent / "regime_summary.json"),
         ("scr_quality", fig_scr_quality, out.parent / "phase7" / "qa_summary.json"),
         ("joint", fig_joint, out.parent / "phase8" / "joint_summary.json"),
+        ("device", fig_device, out.parent / "energy_model.json"),
     ):
         if name not in wanted:
             continue
