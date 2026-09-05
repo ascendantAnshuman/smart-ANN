@@ -1,16 +1,20 @@
 # SMART-ANN — mid-project review
 
-A working demonstration of the adaptive mechanism on measured data, plus the
-Phase 2 index results. **Not** SMART-ANN as specified: the controller here is one
-policy, and the thermal, energy, SCR and generation work is not built. What is
-built is measured; nothing in this document or in any figure comes from a
-simulator, a placeholder, or a model presented as a measurement.
+The adaptive mechanism demonstrated on measured data, the Phase 2 index
+results, answer quality for the SCR ladder, the joint quality/cost surface, and
+a device feasibility probe that closes the hardware gate.
+
+**Not** SMART-ANN as specified. The thermal and energy models are not built, no
+policy consumes device state, and the controller's own control law was shown to
+be wrong and diagnosed rather than fixed. What *is* built is measured: nothing
+in this document or in any figure comes from a simulator, a placeholder, or a
+model presented as a measurement.
 
 ---
 
 ## 1. What the process caught
 
-Nineteen defects, each caught before it produced a reported number.
+Twenty-two defects, each caught before it produced a reported number.
 
 **Ranked by danger, which is not the same as severity** — by how likely each was
 to survive undetected, not by how wrong it would have been.
@@ -36,6 +40,9 @@ to survive undetected, not by how wrong it would have been.
 | 17 | **The CLI entry point never ran, and the verification certified it** | `cli.py` had no `__main__` guard, so `python -m smartann.cli <anything>` imported the module, ran nothing and exited **0**. Every runbook command used that form. `verify_all.py` checked `data status` *through the broken entry point* and scored the silent success as a pass, so the one check aimed at "do the documented entry points work" could only ever answer yes. Reported 7/7 was 6/7. (ADR-0042) |
 | 18 | **Three of four ablation rungs were the same rung** | The SCR ladder swept `top_windows` 4/3/2/1 at `window=2`, but SQuAD chunks yield at most two windows, so three arms were byte-identical to the baseline. They read as "reduction is free" rather than "reduction did not happen". (ADR-0044) |
 | 19 | **The generation baseline was silently truncated** | Two thirds of the unreduced arm exceeded the model's 512-token limit and was cut, making the baseline a *position-based* reduction. Comparing relevance-based reduction against that would have shown little difference and been read as "reduction is free". (ADR-0045) |
+| 20 | **A "C3 supported" verdict that was pure measurement drift** | Phase 8 ran its cells in BLOCKED order and one generation took 20.4 minutes when the host slept. The mean cost of that cell read 5,778 ms against a median of 817 ms, and blocked ordering inflated ms/token from 1.01 in the cells measured first to 1.96 in those measured last. Both single-dimension baselines sit at the highest nprobe, measured last — so the drift inflated exactly the cells the joint cells were compared against, and manufactured the conclusion. Re-run interleaved with median cost: verdict survived, cell set changed. (ADR-0030, ADR-0046) |
+| 21 | **A build that succeeds and then crashes on import** | hnswlib compiles on-device in 19 s, pip reports success, exit 0 — and `import hnswlib` dies with SIGILL. `-march=native` emitted an instruction the core lacks. Both builds exit 0; only the functional check the pre-declaration demanded distinguishes them. (ADR-0046) |
+| 22 | **A figure registered in the dispatch table but not in the default set** | `fig_scr_quality` drew nothing on a default run — no figure, no error, and the summary reported success. Found by counting the files written against the figures that should exist. |
 
 **Numbering is chronological, not ranked, from #17 on.** By this section's own
 criterion #17 belongs at the top — it is the only defect here that corrupted the
@@ -52,7 +59,7 @@ left stable because ADRs cite them.
   this. Sixteen defects were found by the project looking at itself; this one
   needed someone outside it.
 - **Caught by reading the code** (#1, #3, #8, #11, #14, #16). Cheap, but depends
-  on someone reading the right lines on the right day. Six of nineteen, which is
+  on someone reading the right lines on the right day. Six of twenty-two, which is
   not a system.
 - **Caught by rendering the artifact and looking at it** (#12, #13). Neither a
   threshold nor a test would fire: the script exited 0 and wrote a valid PNG
@@ -62,6 +69,11 @@ left stable because ADRs cite them.
   uniquely durable: the numbers were right, the sentence was wrong, and nothing
   reruns a sentence. A hardcoded verdict in generated prose will eventually
   state the opposite of its own data, and no test asserts on English.
+- **Caught by an invariant the data itself must satisfy** (#20, #21). Generation cost is near-linear in prompt length, so cells disagreeing on
+  ms/token were measured on different machine states rather than doing
+  different work — a diagnostic that needs no external reference, only the
+  ratio the physics requires. #21 is the same idea: a library that builds
+  must also run, and the check that a build exits 0 does not test that.
 - **Caught by printing the treatment beside the outcome** (#18, #19). Both
   would have produced quality numbers that were *correct* for what actually
   ran, and wrong for what was claimed to have run. Neither is visible in the
@@ -477,6 +489,91 @@ had already required interleaving, having been written after the same mistake in
 a different harness. **A rule recorded once in a document does not propagate to
 code written later**, so the reason now lives in the sweep's own docstring.
 
+## 6e. Phase 7 — answer quality, and what reduction actually costs
+
+Until this phase every SCR setting could be priced only in characters, tokens
+and milliseconds. On those axes a reduction that deletes the answer is
+indistinguishable from a free one — both look like a win. This is the missing
+axis.
+
+SQuAD, n=1000, `google/flan-t5-base`, greedy decoding, one
+retrieval configuration held fixed so every difference is attributable to
+reduction alone. Paired bootstrap against `off`, 10,000 resamples; `*` marks a
+95% CI excluding zero.
+
+| arm | EM | F1 | tokens | reduction | gen ms | ΔF1 vs `off` |
+|---|---|---|---|---|---|---|
+| `off` | 0.6060 | 0.6769 | 571 | 0.0% | 650 | — (baseline) |
+| `keep1_ext` | 0.5950 | 0.6661 | 475 | 19.4% | 536 | -0.0108 [-0.0212, -0.0009] \* |
+| `keep2` | 0.5850 | 0.6569 | 448 | 25.2% | 514 | -0.0200 [-0.0329, -0.0083] \* |
+| `keep1` | 0.5110 | 0.5824 | 269 | 61.4% | 346 | -0.0945 [-0.1154, -0.0740] \* |
+
+**Reduction is not free at any level.** Every rung's confidence interval
+excludes zero, including the mildest, which loses 0.011 F1 for 19.4% fewer
+characters. The reading that the broken ladder would have produced — three arms
+holding quality flat while cutting context — was an artifact, not a result
+(ADR-0044).
+
+**But the trade-off is smooth and monotone, which is what C2 needs.** `keep1`
+buys a 47% cut in generation latency for a 14% relative F1 loss. A controller
+under a latency budget has a real dial to turn, and the cost of turning it is
+now a measured quantity rather than an assumption.
+
+### The finding that decides whether SCR is worth having
+
+SCR's own cost was measured here at ~8 ms per query against a **warm** embedding
+cache. Phase 5 measured it on the query path, cold, at ~1220 ms p95. Those two
+numbers bracket the entire question:
+
+- **cold, on-path** — SCR costs roughly 4× what it saves. It cannot pay for itself.
+- **warm, precomputed** — 8 ms against ~300 ms saved. A clear win.
+
+The difference is *when* window embeddings are computed, and the corpus is
+**static**, so they could be computed once at index time. That converts SCR from
+a loss into a win, and it is an implementation choice rather than a property of
+the method. It is recorded rather than acted on, because it would move the cost
+model's dominant term — the same trap already flagged for cluster caching, where
+a model fitted on `n_cluster_loads` is invalid for `n_cache_misses`.
+
+## 6f. Phase 8 — C3, joint versus split control
+
+The question is about a **surface**, not a controller: if the best joint setting
+is no better than the best single-dimension setting at the same cost, no control
+law can recover the difference. So the grid is swept directly.
+
+Cost is the **median** of retrieval plus generation. `ms/token` is the drift
+diagnostic — generation is near-linear in prompt length, so cells that disagree
+on it were measured on different machine states, not doing different work.
+
+| nprobe | SCR | family | F1 | cost ms | ms/token |
+|---|---|---|---|---|---|
+| 1 | `off` | retrieval only | 0.5287 | 1022 | 1.780 |
+| 1 | `keep2` | joint | 0.5256 | 781 | 1.758 |
+| 1 | `keep1` | joint | 0.4710 | 516 | 1.935 |
+| 4 | `off` | retrieval only | 0.6459 | 1043 | 1.818 |
+| 4 | `keep2` | joint | 0.6374 | 804 | 1.792 |
+| 4 | `keep1` | joint | 0.5779 | 526 | 1.930 |
+| 16 | `off` | retrieval only | 0.7134 | 1063 | 1.812 |
+| 16 | `keep2` | reduction only | 0.7017 | 837 | 1.817 |
+| 16 | `keep1` | reduction only | 0.6351 | 550 | 1.953 |
+
+ms/token spread across cells: **1.11×**, within the 1.25× gate.
+
+**Declared test:** a joint cell supports C3 if **no single-dimension cell
+dominates it** — at least as accurate *and* at least as cheap. Result: nprobe=1/`keep1`, nprobe=4/`keep2`, nprobe=4/`keep1`
+sit on the Pareto front.
+
+**C3 is supported, and the shape of the support matters.** No joint cell
+dominates the best single-dimension cell outright; the best F1 on the surface is
+still retrieval-only at maximum effort. What joint control does is **extend the
+frontier downward in cost** — it reaches operating points at 516–804 ms that
+neither dimension reaches alone. That is precisely the region an adaptive
+controller occupies under pressure, so the gain is real but it is a trade-off
+along the front, not a free win.
+
+**This verdict is the second one this experiment produced.** The first run also
+said "C3 supported", and it was an artifact — see the defect table, #20.
+
 ## 6d. Contribution scoreboard
 
 The phase table says what was built. This says what can be *claimed*, which is
@@ -485,47 +582,69 @@ the number that matters and is consistently lower.
 | | Contribution | State | What is missing |
 |---|---|---|---|
 | **C1** | Runtime-adaptive ANN effort | **Demonstrated** — three independent experiments | Narrowed by measurement: `ef_centroid` is free and `ef_list` inert, so it is one-dimensional. Stated as *adaptive retrieval effort*, not "several ANN parameters". |
-| **C2** | Adaptive SCR aggressiveness | **Mechanism + cost only** | Answer quality. Needs a generator (Phase 7, blocked on MSVC). |
-| **C3** | Joint vs split control | **Both dimensions run, cost-only** | Same. The joint cell is currently *worse*, and without quality that cannot be interpreted. |
-| **C4** | Budget-constrained retrieval | **Half** — latency budgets honoured at 0.2% violation | Energy budgets: machinery exists, measurement does not. Needs the phone. |
-| **C5** | Battery / device-state policy | **Nothing** | Needs the phone. |
+| **C2** | Adaptive SCR aggressiveness | **Demonstrated** — quality measured, n=1000 | Reduction costs quality at every level (all CIs exclude zero), and the trade-off is smooth enough to control. Whether SCR *pays* depends on precomputing window embeddings; on-path it costs 4× what it saves. |
+| **C3** | Joint vs split control | **Supported on the surface** — 3 joint cells on the Pareto front | Joint control extends the frontier *downward in cost*; it does not beat single-dimension control at peak quality. A controller that exploits this is not yet built. |
+| **C4** | Budget-constrained retrieval | **Half** — latency budgets honoured at 0.2% violation | Energy budgets: the measurement now EXISTS (ADR-0046) but no energy-constrained policy has been run against it. `honours_energy_budget()` still returns False. |
+| **C5** | Battery / device-state policy | **Unblocked, not built** | Device state is now readable — battery current, 110 thermal zones, per-cluster frequency. Nothing consumes it yet. |
 
-**One of five is fully demonstrated; one is half; three are gated on hardware.**
-That gap between "code written" and "claim supported" is the honest state of the
-project, and it is not closed by writing more code.
+**Two of five are demonstrated, one is supported, one is half, one is
+unblocked-but-unbuilt.** That is up from one-and-a-half at the last review, and
+the movement came from two places: a blocker that turned out not to exist
+(ADR-0043) and a USB cable (ADR-0046).
 
 ## 7. What is not built, and what gates it
 
+**The hardware gate is gone.** All seven pre-declared device questions are
+answered and both critical ones passed (ADR-0046). Phase 3.5 is **GO**.
+
 | Not built | Gate |
 |---|---|
-| Thermal model, energy model, DVFS tiers | A device trace. This machine can measure neither temperature nor energy — WMI thermal zone is access-denied without elevation, there is no RAPL on Windows, and WSL2 exposes no populated `powercap`. The Android phone is the **only** source. |
+| Thermal model, energy model, DVFS tiers | Phase 3.5's trace, which is now runnable. Constants must be **fitted** from it, never chosen. |
 | Bandit policy, Pareto policy, safety shield | Phase 6, which needs the Phase 3 cost model. |
-| Battery- and thermal-aware policy (C5) | The same device trace. Nothing in software unblocks it. |
+| Energy-constrained policy (C4's second half) | The measurement now exists; no policy consumes it. `honours_energy_budget()` still returns False and must until one does. |
+| Battery/device-state policy (C5) | Device state is readable. Nothing consumes it yet. |
 
-**Answer generation was never actually blocked** (ADR-0043). It was recorded
-here, in `TODO.md` and in the runbook as gated on the MSVC toolchain. That
-finding was real but scoped to the wrong noun: `llama-cpp-python` does need
-MSVC, and this project needs *a generator*, not llama.cpp. `torch` and
-`transformers` have been installed since Phase 1 as dependencies of
-`sentence-transformers` — a CPU generator was available the whole time, and no
-new dependency was added to use it. The blocker was written against the first
-tool tried rather than against the missing capability, and three documents then
-repeated it faithfully for as long as nobody restated the requirement.
+**Two conditions carry into every device measurement.**
+
+**`HNSWLIB_NO_NATIVE=1` is mandatory.** Without it the on-device build succeeds
+and the library SIGILLs on import. This belongs in the setup script, not in
+anyone's memory.
+
+**Measure unplugged.** Battery current is available without root and its
+magnitude responds to load, but its **sign is unstable while charging** —
+−106000, +110000, +46000, +97000 µA at 30-second intervals under continuous
+load. Every reading so far was on AC. The convention must be re-established from
+a discharging device before a single joule is reported.
+
+### One decision is waiting on you
+
+**`DeviceState.freq_ratio` is a single scalar, and the target SoC has three
+clock domains.** Eight cores at 2.016 / 2.803 / 3.187 GHz; one instantaneous
+sample held ratios 1.00, 0.61, 0.22 and 0.27 simultaneously. Which ratio a query
+experiences depends on where Android's scheduler placed the thread — something
+this project neither controls nor observes from inside the process.
+
+Nothing has been changed, because `types.py` needs your go-ahead and the options
+differ in what the controller would be permitted to claim:
+
+- a **per-cluster vector**, which is honest but changes every consumer of `DeviceState`
+- the **ratio of the core the thread actually ran on**, which is the physically
+  meaningful one but requires reading the scheduler's placement per query
+- a **documented worst case**, which is cheap and weakens every claim built on it
 
 The energy and thermal dependency was **identified and recorded in Phase 1**
 (ADR-0007, ADR-0008), before any work was built on top of it — not discovered
-late. The capability table in every run manifest makes the absence machine-
-checkable rather than a matter of memory.
+late. The capability table in every run manifest makes the absence
+machine-checkable rather than a matter of memory.
 
-**One decision must be made before Phase 3 starts.** Caching reconstructed
+**One decision must be made before Phase 3 is extended.** Caching reconstructed
 cluster data would remove most of the remaining load cost, but it changes the
 dominant cost term from `n_cluster_loads` to `n_cache_misses` — different
 distributions, so a cost model fitted on one is *invalid* for the other, and the
-failure would surface as unexplained controller underperformance in Phase 6.
-Current decision: no cache; memory-map instead, which gets most of the benefit
-while keeping cost a function of bytes touched rather than of history.
-
----
+failure would surface as unexplained controller underperformance. Current
+decision: no cache; memory-map instead. **The same trap now applies to SCR**,
+where precomputing window embeddings would move its cost from ~1220 ms on-path
+to ~8 ms — a change worth making and worth re-fitting for, not slipping in.
 
 ## 8. Reproducing this
 

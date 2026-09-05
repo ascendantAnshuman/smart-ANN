@@ -516,6 +516,65 @@ def fig_regime(regime_json: Path, out: Path) -> None:
     print(f"wrote {out}", flush=True)
 
 
+def fig_joint(joint_json, out) -> None:
+    """C3: does controlling both dimensions reach anything one cannot?
+
+    The declared test is Pareto domination -- a joint cell supports C3 when no
+    single-dimension cell is at least as accurate AND at least as cheap. Marker
+    shape carries the family, so a reader can see WHERE on the frontier the
+    joint cells sit rather than taking the verdict on trust.
+
+    The cost axis is a MEDIAN, not a mean. The first run of this experiment had
+    one generation take 20.4 minutes when the host slept, which dragged that
+    cell's mean to six times its median and inflated exactly the baseline the
+    joint cells were compared against (ADR-0046).
+    """
+    d = json.loads(joint_json.read_text(encoding="utf-8"))
+    cells = d["cells"]
+    front = {(c["nprobe"], c["scr"]) for c in d["joint_cells_on_pareto_front"]}
+
+    style = {
+        "retrieval_only": ("o", "#0353a4", "retrieval only (SCR off)"),
+        "reduction_only": ("s", "#c1121f", "reduction only (max nprobe)"),
+        "joint": ("^", "#2a9d8f", "joint (both varying)"),
+    }
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    seen = set()
+    for c in cells:
+        m, col, lab = style[c["family"]]
+        ax.scatter(
+            c["cost_ms"],
+            c["f1"],
+            marker=m,
+            s=130,
+            color=col,
+            edgecolor="black" if (c["nprobe"], c["scr"]) in front else "none",
+            linewidth=1.6,
+            zorder=3,
+            label=lab if lab not in seen else None,
+        )
+        seen.add(lab)
+        ax.annotate(
+            f"n={c['nprobe']}/{c['scr']}",
+            (c["cost_ms"], c["f1"]),
+            textcoords="offset points",
+            xytext=(7, -3),
+            fontsize=7.5,
+        )
+    ax.set_xlabel("cost: median retrieval + median generation (ms)")
+    ax.set_ylabel("token F1")
+    ax.set_title(
+        f"C3 -- joint vs single-dimension control\n"
+        f"SQuAD, n={d['n_questions']}, ring = on the Pareto front "
+        f"(no single-dimension cell dominates it)",
+        fontsize=9,
+    )
+    ax.legend(fontsize=8, loc="lower right")
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"wrote {out}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", default=None, help="directory holding static/ and aimd/")
@@ -543,7 +602,19 @@ def main() -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    wanted = set(args.only) if args.only else {"headline", "recall_effort", "footprint", "regime"}
+    # Every registered figure belongs in the default set. `scr_quality` was
+    # registered in the dispatch table below but omitted here, so it silently
+    # drew nothing on a default run -- no figure, no error, and the summary
+    # reported success. A figure that is skipped by default is a figure nobody
+    # will notice is missing.
+    all_figures = {"headline", "recall_effort", "footprint", "regime", "scr_quality", "joint"}
+    wanted = set(args.only) if args.only else all_figures
+    unknown = wanted - all_figures
+    if unknown:
+        print(
+            f"unknown figure(s): {sorted(unknown)}; known: {sorted(all_figures)}", file=sys.stderr
+        )
+        return 1
     failures = []
     if "headline" in wanted:
         try:
@@ -559,6 +630,7 @@ def main() -> int:
         ("footprint", fig_footprint, out.parent / "phase2_summary.json"),
         ("regime", fig_regime, out.parent / "regime_summary.json"),
         ("scr_quality", fig_scr_quality, out.parent / "phase7" / "qa_summary.json"),
+        ("joint", fig_joint, out.parent / "phase8" / "joint_summary.json"),
     ):
         if name not in wanted:
             continue
