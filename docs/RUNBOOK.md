@@ -200,7 +200,7 @@ hardcoded result (Section 3, rule 1).
 | `C:\smartann-results\` | one directory per run: parquet + manifest |
 | `results\` (in repo) | figures, profile table, cost model, verification |
 | `docs\review.md` | the report: status, results, findings, what is blocked |
-| `docs\decisions.md` | 46 ADRs — the reasoning behind every non-obvious choice |
+| `docs\decisions.md` | 48 ADRs — the reasoning behind every non-obvious choice |
 
 Neither `data/` nor `results/` is committed.
 

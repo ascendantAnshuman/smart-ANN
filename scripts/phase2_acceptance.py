@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,59 @@ MOBILERAG_FIG6_MB = {"sift1m": 9.67, "nytimes": 3.53}
 PROBE_HEALTHY, PROBE_WORKABLE = 0.15, 0.35
 
 
+class MachineWatch:
+    """Sample CPU for the WHOLE run, not just before it.
+
+    `assert_machine_quiet` checks the machine once, at t=0, and a 13-minute
+    timing run then proceeds on the strength of a 1-second observation. That
+    held until a game launched partway through a verification: the start check
+    passed, the run took 4,686 s against a previous 796 s, and the only reason
+    it was not reported as a result is that it blew through a timeout. Had it
+    been 10% slower instead of 490%, it would have been recorded as a
+    measurement.
+
+    So the guard now runs for the duration. Contamination is reported as a
+    distinct exit code rather than a warning in a log, because a warning in a
+    log is what the previous three occurrences of this defect produced.
+    """
+
+    def __init__(self, max_util: float = 0.25, period_s: float = 2.0) -> None:
+        self.max_util = max_util
+        self.period_s = period_s
+        self.samples: list[float] = []
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        def loop() -> None:
+            while not self._stop.wait(self.period_s):
+                self.samples.append(psutil.cpu_percent(interval=None) / 100.0)
+
+        psutil.cpu_percent(interval=None)  # prime the counter; first call is meaningless
+        self._thread = threading.Thread(target=loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> dict[str, float]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+        if not self.samples:
+            return {"n": 0, "contaminated": False}
+        a = np.asarray(self.samples)
+        over = float((a > self.max_util).mean())
+        return {
+            "n": int(a.size),
+            "median": float(np.median(a)),
+            "p95": float(np.percentile(a, 95)),
+            "max": float(a.max()),
+            "fraction_over_threshold": over,
+            # A brief spike is the scheduler; a sustained fifth of the run above
+            # the threshold is another workload. 10% is the line, and it is a
+            # judgement -- recorded here so it can be argued with.
+            "contaminated": bool(over > 0.10),
+        }
+
+
 def assert_machine_quiet(max_util: float = 0.25, samples: int = 4) -> None:
     """Refuse to take a timing measurement on a busy machine.
 
@@ -68,7 +122,7 @@ def assert_machine_quiet(max_util: float = 0.25, samples: int = 4) -> None:
         )
     print(
         f"machine check: {busy * 100:.0f}% busy, below the {max_util * 100:.0f}% "
-        f"threshold -- timings are trustworthy",
+        f"threshold at START -- see MachineWatch for the rest of the run",
         flush=True,
     )
 
@@ -741,6 +795,11 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    # The watch runs even under --allow-busy. Opting out of the GATE is not the
+    # same as opting out of the EVIDENCE: a run taken on a busy machine still
+    # needs its contamination on record, or the numbers outlive the caveat.
+    watch = MachineWatch()
+    watch.start()
     if not args.allow_busy:
         assert_machine_quiet()
 
@@ -762,11 +821,38 @@ def main() -> int:
             continue
         fn()
     summary()
+
+    load = watch.stop()
+    if load.get("n"):
+        print(
+            f"machine during the run: median {load['median'] * 100:.0f}%, "
+            f"p95 {load['p95'] * 100:.0f}%, max {load['max'] * 100:.0f}%, "
+            f"{load['fraction_over_threshold'] * 100:.0f}% of samples above the "
+            f"{watch.max_util * 100:.0f}% threshold",
+            flush=True,
+        )
+        MEASURED["machine_load"] = load
     if MEASURED:
         out = Path(args.emit_json)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(MEASURED, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"wrote {out}", flush=True)
+
+    if load.get("contaminated") and not args.allow_busy:
+        # Exit 2, distinct from the 1 that means "a check failed". The
+        # difference matters: exit 1 is a RESULT, and this is the absence of
+        # one. verify_all.py expects (0, 1) for this step, so a contaminated
+        # run cannot be certified as a reproduction.
+        print(
+            f"\nCONTAMINATED: another workload was running for "
+            f"{load['fraction_over_threshold'] * 100:.0f}% of this run. The pass/fail "
+            f"verdicts above still stand -- they are recall and memory properties, not "
+            f"timings -- but every DURATION here is meaningless and must not be quoted. "
+            f"Close the other workload and re-run.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
     return 0 if all(p for _, p, _ in RESULTS) else 1
 
 

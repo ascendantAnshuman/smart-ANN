@@ -93,7 +93,10 @@ STEPS = [
         [PY, "scripts/phase2_acceptance.py", "--datasets", "sift1m", "nytimes"],
         "The 15 index checks against real data. Expected 14 PASS / 1 FAIL -- the "
         "NYTimes cluster-miss property, which is a dataset fact and not a defect. "
-        "Exit 1 is therefore expected; a timeout or a crash is not.",
+        "Exit 1 is therefore expected; a timeout or a crash is not. Exit 2 means "
+        "another workload ran during the measurement and every duration is "
+        "meaningless -- it is deliberately NOT in the expected set, because a "
+        "contaminated run is the absence of a result rather than a result.",
         expect_codes=(0, 1),
         timeout_s=3600.0,
     ),

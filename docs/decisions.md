@@ -2196,3 +2196,66 @@ skin zone is the responsive one and the battery zone is not a substitute.
 not controlled. Per-query energy attribution will need either a much longer
 integration window or an idle-baseline subtraction, and which of those is sound
 is a Phase 3.5 question, not settled here.
+
+---
+
+## ADR-0048 — A guard enforced once at t=0 does not hold for thirteen minutes
+
+**Status.** Accepted. 2026-09-05.
+
+**What happened.** A full `verify_all.py` run came back **6/7**: the Phase 2
+acceptance step timed out at 4,686 s against a 3,600 s limit, having taken
+**796 s** the previous time. A 5.9× degradation.
+
+The cause was not in the project. `VALORANT-Win64-Shipping` was running with
+9,729 s of accumulated CPU and 2 GB resident, and the machine sat at 63% busy.
+
+**Why this is worth an ADR anyway.** `assert_machine_quiet()` exists precisely
+to prevent this, and it did not. It samples the CPU **four times over one
+second, before the run starts**, and then a thirteen-minute measurement proceeds
+on the strength of that one-second observation. The game either launched
+partway through or the check landed in a quiet moment.
+
+**The near miss is the point.** This run failed loudly because it was 490%
+slower and blew a timeout. *Had it been 10% slower it would have been written
+into `phase2_summary.json` as a measurement*, and the figures would have plotted
+it. The guard's failure mode is silent in exactly the range where corruption is
+most plausible.
+
+This is the fourth occurrence of this defect in the project (#14 counted three:
+a concurrent experiment, this project's own O(n²) figure generation perturbing
+the latencies it was plotting, and leftover load). The rule "run experiments
+alone" has now been violated four times *while written down*, which is evidence
+about rules rather than about discipline.
+
+**The decision.** `MachineWatch` samples CPU every 2 s for the **whole** run and
+reports the distribution — median, p95, max, and the fraction of samples above
+threshold — into `phase2_summary.json`. A run with more than **10%** of its
+samples over the threshold exits **2**.
+
+Three things about that design were deliberate:
+
+**Exit 2, not exit 1.** Exit 1 already means "a check failed", which is a
+*result* — the NYTimes cluster-miss property is a real finding. A contaminated
+run is the **absence** of a result, and collapsing the two would let a corrupted
+run be certified as the expected outcome. `verify_all.py` expects `(0, 1)` for
+this step, so exit 2 fails verification without any further change.
+
+**Fraction of samples, not the mean.** One sample at 100% lifts the mean of 100
+quiet samples to 6%, so a mean-based rule near 5% trips on a single spike.
+Counting samples over the line means magnitude cannot substitute for duration.
+
+**10%, and a brief spike is tolerated.** A guard that fires on any spike gets
+disabled within a week, which is worse than one that fires only on sustained
+load. The threshold is a judgement, so it is pinned by tests in
+`tests/test_machine_watch.py` — a judgement with no test is a number that
+drifts.
+
+**The watch runs even under `--allow-busy`.** Opting out of the *gate* is not
+opting out of the *evidence*: a run taken knowingly on a busy machine still
+needs its contamination recorded, or the numbers outlive the caveat.
+
+**What did not change.** The pass/fail verdicts from the contaminated run are
+still valid — they are recall and memory properties, not timings. Only the
+durations are meaningless. The failure message says so, because "re-run
+everything" is the wrong instruction when only one column is affected.
