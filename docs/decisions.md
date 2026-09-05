@@ -2325,3 +2325,79 @@ observed, because a shield should trip on states the calibration did not visit.
 **What this does not make true.** C4 and C5 are *built*, not *demonstrated*.
 Neither has run against the handset in an experiment, and until one does the
 scoreboard says built-not-demonstrated. 440 tests.
+
+---
+
+## ADR-0050 — HNSW index files are not portable between host and device
+
+**Status.** Accepted. 2026-09-05. Phase 3.5 groundwork.
+
+**The question this settles.** The device probe recorded, as an open risk, that
+"index files written by one are not assumed loadable by the other, and Phase 9
+must verify that rather than presume it" (ADR-0046). Verified. **They are not.**
+
+**What happened.** The SQuAD EcoVector index was pushed to the handset and
+`load_index` refused it:
+
+```
+RuntimeError: Index seems to be corrupted or unsupported
+```
+
+The obvious hypothesis is a truncated transfer, and it is wrong. The file is
+byte-identical on both machines — 391,128 bytes, SHA-256 `a0060e6d4fbe9b92…`
+on the laptop and on the phone. Nothing was corrupted; the format is simply not
+readable by the other library.
+
+The writer is **chroma-hnswlib 0.7.5** (the redistribution this project uses
+because upstream publishes no Windows wheels, ADR-0017). The reader is
+**upstream hnswlib 0.8.0**, the only one that builds under Termux.
+
+**Neither can be moved to meet the other.**
+
+- Upstream hnswlib has no 0.7.5. Its releases go 0.7.0 → 0.8.0; the 0.7.5
+  version number belongs to chroma's fork alone, so "pin the same version" is
+  not available.
+- `chroma-hnswlib==0.7.5` does not install under Termux. Its build backend
+  (`mesonpy`) fails to bootstrap on aarch64/Android, with and without build
+  isolation.
+
+**The resolution: only the graph is unportable, so only the graph is rebuilt.**
+
+An EcoVector index is mostly plain `.npy` — centroids, assignments, and (with
+per-cluster graphs disabled, ADR-0028) every cluster. NumPy's format is
+portable and transferred without complaint. The single non-portable artifact is
+`centroid_graph.bin`, and it holds 215 centroids.
+
+So it is rebuilt on-device from the portable `centroids.npy`, using the
+parameters recorded in `meta.json` — M=32, ef_construction=200, space=ip —
+rather than defaults. **0.016 seconds.**
+
+**Equivalence was checked, not assumed.** Rebuilding a graph changes its random
+structure, so the device index could differ from the host's. Measured against
+the same ground truth at the same configuration (nprobe=16, k=10, 300 queries):
+
+```
+HOST   recall@10 = 0.9543
+DEVICE recall@10 = 0.9543
+```
+
+Identical. The trace therefore measures the same retrieval system, not an
+approximation of it. Had they differed, every device number would have been
+about a different index and the comparison to host results would have been
+meaningless.
+
+**Consequences for Phase 9.** Any device deployment must rebuild the centroid
+graph locally; shipping the host's binary does not work and fails loudly rather
+than silently, which is the one merciful part. Per-cluster graphs would make
+this far worse — there would be hundreds of unportable binaries instead of one
+— which is an argument for ADR-0028's decision that had not previously been
+noticed.
+
+**A related portability fix.** `psutil` does not build under Termux, and three
+modules imported it at module scope. It was used for exactly one thing:
+reporting resident memory. It is now optional in `ecovector.py`, `baselines.py`
+and `builder.py`; without it the memory fields report **NaN**, which is this
+project's established meaning for "not measured", rather than 0.0, which would
+read as "no memory used" and silently satisfy the Phase 2 footprint check.
+Building an index without psutil raises instead, because a build that cannot
+record its own peak memory should not pretend to.

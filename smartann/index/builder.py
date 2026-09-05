@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import psutil
+
+try:  # needed to BUILD an index, not to read one -- see ecovector.py
+    import psutil
+except ImportError:  # pragma: no cover - exercised on Android, not on CI
+    psutil = None  # type: ignore[assignment]
 
 from smartann.data.readers import duplicate_report
 from smartann.index.storage import (
@@ -183,6 +187,12 @@ def build_ecovector(
 
     from smartann.bench.manifest import library_versions
 
+    if psutil is None:
+        raise RuntimeError(
+            "building an index records its own peak memory, which needs psutil. "
+            "psutil does not build under Termux on aarch64; build on a host and "
+            "push the index instead. Reading an index needs neither."
+        )
     proc = psutil.Process(os.getpid())
     rss0 = proc.memory_info().rss
     peak = rss0

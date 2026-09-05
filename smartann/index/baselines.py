@@ -19,7 +19,11 @@ import time
 from pathlib import Path
 
 import numpy as np
-import psutil
+
+try:  # a memory profiler, not a retrieval dependency -- see ecovector.py
+    import psutil
+except ImportError:  # pragma: no cover - exercised on Android, not on CI
+    psutil = None  # type: ignore[assignment]
 
 from smartann.index.ecovector import SearchResult, _anon_mb, _modelled_comparisons
 from smartann.index.storage import IndexMeta, IndexPaths
@@ -52,7 +56,7 @@ class FlatHnswIndex:
 
         self.paths = IndexPaths(Path(root))
         self.meta = IndexMeta.from_json(self.paths.meta)
-        self._proc = psutil.Process(os.getpid())
+        self._proc = psutil.Process(os.getpid()) if psutil is not None else None
         self._graph = hnswlib.Index(space=self.meta.space, dim=self.meta.dim)
         self._graph.load_index(str(self.paths.centroid_graph), max_elements=self.meta.n_base)
         self._graph.set_num_threads(1)
@@ -114,6 +118,11 @@ def build_flat_hnsw(
 
     from smartann.bench.manifest import library_versions
 
+    if psutil is None:
+        raise RuntimeError(
+            "building a baseline index reports its own memory cost, which needs "
+            "psutil. Reading an existing index does not."
+        )
     proc = psutil.Process(os.getpid())
     rss0 = proc.memory_info().rss
     t0 = time.perf_counter()

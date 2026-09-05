@@ -26,7 +26,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-import psutil
+
+try:  # psutil is a memory PROFILER, not a retrieval dependency
+    import psutil
+except ImportError:  # pragma: no cover - exercised on Android, not on CI
+    psutil = None  # type: ignore[assignment]
 
 from smartann.index.storage import (
     CLUSTER_EMPTY,
@@ -107,7 +111,13 @@ class EcoVectorIndex:
 
         self.paths = paths
         self.meta = meta
-        self._proc = psutil.Process(os.getpid())
+        # Optional, deliberately. psutil is a C extension that does not build
+        # under Termux on aarch64, and it is used here for ONE thing: reporting
+        # resident memory. Retrieval does not depend on it. Without it the
+        # memory fields report NaN, which is this project's established meaning
+        # for "not measured" -- as opposed to 0.0, which would read as "no
+        # memory used" and silently satisfy the Phase 2 footprint check.
+        self._proc = psutil.Process(os.getpid()) if psutil is not None else None
 
         self.centroids: np.ndarray = np.load(paths.centroids)
         self.assignments: np.ndarray = np.load(paths.assignments, mmap_mode="r")
@@ -178,9 +188,9 @@ class EcoVectorIndex:
         res.n_dist_modeled = probe.n_dist_modeled
 
         t_start = time.perf_counter()
-        mem0 = self._proc.memory_info()
-        anon_peak = _anon_mb(mem0)
-        rss_peak = mem0.rss / 2**20
+        mem0 = self._proc.memory_info() if self._proc is not None else None
+        anon_peak = _anon_mb(mem0) if mem0 is not None else float("nan")
+        rss_peak = mem0.rss / 2**20 if mem0 is not None else float("nan")
 
         found_ids: list[np.ndarray] = []
         found_dists: list[np.ndarray] = []
@@ -240,9 +250,10 @@ class EcoVectorIndex:
             if kind == CLUSTER_FLAT:
                 res.bytes_read += self.paths.cluster_ids_file(int(cid)).stat().st_size
 
-            mem = self._proc.memory_info()
-            anon_peak = max(anon_peak, _anon_mb(mem))
-            rss_peak = max(rss_peak, mem.rss / 2**20)
+            if self._proc is not None:
+                mem = self._proc.memory_info()
+                anon_peak = max(anon_peak, _anon_mb(mem))
+                rss_peak = max(rss_peak, mem.rss / 2**20)
 
         t_merge = time.perf_counter()
         if found_ids:
