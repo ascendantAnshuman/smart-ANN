@@ -2132,3 +2132,67 @@ Termux 0.118.3 predates this handset's Android 16 by four major versions.
 
 **Phase 3.5 decision: GO**, on two conditions — the trace is taken unplugged,
 and the 30-minute multi-process case is verified before it is relied on.
+
+---
+
+## ADR-0047 — Energy sign convention, calibrated on battery, cross-checked two ways
+
+**Status.** Accepted. 2026-09-05. Raw samples in `docs/device/calib.log`.
+
+**Why a calibration and not a measurement.** ADR-0046 established that
+`termux-battery-status` reports a `current` field that responds to load, but
+every reading was taken while charging, where the sign flipped between samples
+under *constant* load as the charger modulated. A joule reported before knowing
+which direction means "leaving the battery" is a plausible-looking wrong number,
+which is the failure mode this project exists to avoid. So the first thing run
+on battery was not an experiment.
+
+**Design: idle / load / idle, not before-and-after.** A single pair cannot
+distinguish a load effect from drift. Bracketing the load with a baseline on
+both sides measures the drift directly — the same reason Phase 8 had to be
+re-run interleaved (ADR-0046, defect #20).
+
+**Result.** 40 samples at 3-second intervals, wake lock held, 7 cores loaded for
+60 s, `plugged: UNPLUGGED`, `status: DISCHARGING` throughout.
+
+| phase | n | current (median) | range | voltage | battery | skin |
+|---|---|---|---|---|---|---|
+| idle_pre | 10 | **−334 mA** | −1050 … −265 | 4280 mV | 31.4 °C | 36.6 °C |
+| load | 20 | **−753 mA** | −1084 … −221 | 4248 mV | 31.6 °C | **41.4 °C** |
+| idle_post | 10 | **−256 mA** | −507 … −213 | 4295 mV | 32.6 °C | 38.1 °C |
+
+**The sign convention: NEGATIVE is discharge.** All 40 samples were negative
+while discharging — no exceptions, no flips. This is the fact every later energy
+figure depends on, and it is now established rather than assumed.
+
+**Load costs −419 mA against the pre-baseline and −497 mA against the post.**
+Idle drift between the two baselines is +78 mA, which is why both were measured;
+quoting the load delta against a single baseline would carry that drift silently.
+
+**Independent cross-check, and it agrees.** `charge_counter` fell 1708000 →
+1689000 µAh over 148 s. Integrating that gives **462 mA** mean draw. Integrating
+the instantaneous current samples over the same window, weighted by phase
+duration, gives **524 mA**. Two mechanisms — a coulomb counter and a current
+sensor — agreeing within 12% is the external reference this project's defect
+taxonomy calls the only category that catches plausible-looking errors. Neither
+number is derived from the other.
+
+**Voltage sags under load**, 4280 → 4248 mV, and recovers to 4295. Energy must
+therefore be integrated as **V·I·dt**, not I·dt scaled by a nominal voltage.
+Treating voltage as constant would understate load power by roughly 0.7% here
+and more under heavier draw.
+
+**Power, for scale.** Idle ≈ 334 mA × 4.280 V = **1.43 W**. Loaded ≈ 753 mA ×
+4.248 V = **3.20 W**. A 7-core busy loop costs about **1.8 W** on this handset.
+
+**Thermal signal confirmed at useful magnitude.** Skin temperature rose 36.6 →
+41.4 °C over 60 s of load and fell back to 38.1 °C — a 4.8 °C swing, an order of
+magnitude above sensor noise. This is the signal Phase 4's thermal constants
+must be *fitted* from. Battery temperature moved only 31.4 → 32.6 °C, so the
+skin zone is the responsive one and the battery zone is not a substitute.
+
+**What this does not settle.** The `current` range within each phase is wide
+(idle spans −1050 to −265 mA) because the screen, radios and background apps are
+not controlled. Per-query energy attribution will need either a much longer
+integration window or an idle-baseline subtraction, and which of those is sound
+is a Phase 3.5 question, not settled here.
