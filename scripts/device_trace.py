@@ -140,6 +140,12 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--out", default="/sdcard/smartann/trace")
     ap.add_argument("--nprobe", type=int, nargs="*", default=[1, 4, 8, 16, 32])
+    ap.add_argument(
+        "--require-discharging",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="refuse to start unless the handset is on battery (energy needs it)",
+    )
     args = ap.parse_args()
 
     from smartann.index.ecovector import EcoVectorIndex
@@ -165,6 +171,34 @@ def main() -> int:
             p = index.probe(queries[i], cfgs[n])
             index.finish(queries[i], p, cfgs[n])
     print("warmed", flush=True)
+
+    # Refuse to start an energy trace on a charging device.
+    #
+    # Asking nicely did not work. A 20-minute run completed with all 209 samples
+    # CHARGING, and the resulting current had a median of 0 mA with a 103/102
+    # split between negative and positive -- the charger modulating, exactly as
+    # ADR-0047 predicted. Integrating V*I*dt over a sign that is a coin flip
+    # yields approximately zero, so the run was not a weak measurement; it was
+    # not a measurement. The check is cheap and the failure is silent, which is
+    # the combination that earns a guard.
+    if args.require_discharging:
+        try:
+            b0 = read_battery()
+        except Exception as exc:
+            print(f"cannot read the battery, so cannot verify power state: {exc}", file=sys.stderr)
+            print("pass --no-require-discharging for a thermal-only trace.", file=sys.stderr)
+            return 2
+        if str(b0.get("status", "")).upper() != "DISCHARGING":
+            print(
+                f"REFUSING TO START: battery status is {b0.get('status')!r}, not "
+                f"DISCHARGING. While charging, the current's SIGN alternates between "
+                f"samples under constant load, so no energy can be integrated from "
+                f"this state (ADR-0047). Unplug the cable, or pass "
+                f"--no-require-discharging to take a thermal-only trace.",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"power state OK: {b0.get('status')}, {b0.get('percentage')}%", flush=True)
 
     sampler = Sampler(args.sample_period, out / "telemetry.jsonl")
     sampler.start()

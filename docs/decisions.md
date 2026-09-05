@@ -2490,3 +2490,92 @@ happened because the control period was shorter than the observation delay
 not milliseconds. Any thermal controller sampling faster than that will
 reproduce the same collapse, and now there is a measured number saying so
 instead of an argument.
+
+---
+
+## ADR-0052 — C4: energy measured on the device, and the part that is refused
+
+**Status.** Accepted. 2026-09-05. `results/energy_model.json`, trace in
+`results/device/e2_*`.
+
+**The first measured energy in this project.** 15,425 queries over 20.0 minutes
+on the vivo I2304, **unplugged**, `nprobe` swept 1→32, 209 telemetry samples,
+**zero read failures**. All 209 samples `DISCHARGING`; all 209 currents
+negative.
+
+### What is measured
+
+| | |
+|---|---|
+| total energy | **1531.4 J** over 20.0 min |
+| mean power | **1.277 W** |
+| power p5 / p95 | 0.736 / 2.218 W |
+| all-in per query | **99.28 mJ** |
+| voltage | 4.022–4.132 V (sagging under load, so V·I·dt, not I·dt) |
+
+**Effort drives power, and the relationship needs no model:**
+
+| work rate (clusters/s) | median power |
+|---|---|
+| 95–126 | 0.864 W |
+| 126–141 | 0.925 W |
+| 141–153 | 0.989 W |
+| 153–189 | 1.330 W |
+| 189–251 | **1.940 W** |
+
+A 2.6× increase in retrieval work costs a 2.2× increase in power, correlation
++0.645. That is C4's premise demonstrated on real hardware: **retrieval effort
+has a measurable energy price, so an energy budget is a thing a controller can
+actually trade against.**
+
+### What is refused, and why
+
+The obvious next step is `power ~ a·work_rate + b`, giving marginal energy per
+cluster. It fits, at R² = 0.415, and returns:
+
+```
+a = 9.444e-03 W per cluster/s
+b = -0.209 W       <-- a phone idling at NEGATIVE 209 milliwatts
+```
+
+**That is not reported as a result.** The cause is visible in the data:
+`work_rate` spans 95–251 clusters/s and never approaches zero, so the intercept
+extrapolates 95 units past the nearest observation. The arithmetic confirms it
+independently — at the trace's mean effort of 12.2 clusters the marginal term
+predicts **115 mJ/query** against a measured all-in average of **99.3 mJ/query**.
+The marginal exceeds the total, and the negative intercept absorbs the
+difference.
+
+A number implying negative idle power is not a slightly-wrong version of the
+right answer. `fit_energy_model.py` computes it, records it as
+`reportable: false`, and prints why — so the reasoning can be checked rather
+than taken on trust.
+
+**The fix is a trace change, not an analysis change.** The workload must pause
+long enough to measure the baseline the screen and radios draw, instead of
+leaving it to extrapolation. Without idle periods the decomposition is not
+identifiable, however the fit is written.
+
+### The guard this produced
+
+An earlier 20-minute run completed with **all 209 samples CHARGING**, because
+the cable was never pulled. Its current had a median of **0 mA** and a 103/102
+split between negative and positive — the charger modulating, exactly as
+ADR-0047 predicted. Integrating over a sign that is a coin flip yields
+approximately zero, so that run was not a weak measurement but no measurement.
+
+Asking more carefully was not the fix. `device_trace.py` now **refuses to
+start** unless it reads `DISCHARGING` first, and `fit_energy_model.py` refuses
+to integrate a trace containing any charging sample or any positive current.
+Both failures were silent and both are now loud. This is the same lesson as
+`MachineWatch` (ADR-0048): *a precondition asserted once and never verified is
+not a precondition.*
+
+### C4's status
+
+**Half demonstrated, and the half is the important one.** Energy is measurable
+on the target device, responds monotonically to retrieval effort, and
+`EnergyBudgetPolicy.honours_energy_budget()` can now return True against a real
+source. What is not demonstrated is a controller holding a per-query energy
+budget in a live run, because per-query attribution needs the idle baseline
+this trace lacks.
