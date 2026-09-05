@@ -10,7 +10,7 @@ simulator, a placeholder, or a model presented as a measurement.
 
 ## 1. What the process caught
 
-Sixteen defects, each caught before it produced a reported number.
+Nineteen defects, each caught before it produced a reported number.
 
 **Ranked by danger, which is not the same as severity** — by how likely each was
 to survive undetected, not by how wrong it would have been.
@@ -33,12 +33,26 @@ to survive undetected, not by how wrong it would have been.
 | 14 | Timing runs corrupted by background load, **three times** | Once by a concurrent experiment, once by this project's own O(n²) figure generation perturbing the latencies it was plotting, once by leftover load. |
 | 15 | Fork bomb from a missing `__main__` guard | Windows `spawn` re-imported the parent module in every child, recursively. |
 | 16 | `nc="auto"` overridden for SIFT with the reason in a registry string | A real decision recorded where the decision log could not see it. |
+| 17 | **The CLI entry point never ran, and the verification certified it** | `cli.py` had no `__main__` guard, so `python -m smartann.cli <anything>` imported the module, ran nothing and exited **0**. Every runbook command used that form. `verify_all.py` checked `data status` *through the broken entry point* and scored the silent success as a pass, so the one check aimed at "do the documented entry points work" could only ever answer yes. Reported 7/7 was 6/7. (ADR-0042) |
+| 18 | **Three of four ablation rungs were the same rung** | The SCR ladder swept `top_windows` 4/3/2/1 at `window=2`, but SQuAD chunks yield at most two windows, so three arms were byte-identical to the baseline. They read as "reduction is free" rather than "reduction did not happen". (ADR-0044) |
+| 19 | **The generation baseline was silently truncated** | Two thirds of the unreduced arm exceeded the model's 512-token limit and was cut, making the baseline a *position-based* reduction. Comparing relevance-based reduction against that would have shown little difference and been read as "reduction is free". (ADR-0045) |
 
-### Five detection mechanisms, and what each costs
+**Numbering is chronological, not ranked, from #17 on.** By this section's own
+criterion #17 belongs at the top — it is the only defect here that corrupted the
+project's *verification* rather than one of its measurements. The numbers are
+left stable because ADRs cite them.
+
+### Seven detection mechanisms, and what each costs
 
 - **Caught by loud failure** (#15). Free. The machine fell over.
+- **Caught by a user running the documented command** (#17). The cheapest
+  mechanism in the list and the only one this project did not own: a reader
+  pasted a runbook command into their own terminal and got nothing back.
+  Every internal check had passed, including the one built to catch exactly
+  this. Sixteen defects were found by the project looking at itself; this one
+  needed someone outside it.
 - **Caught by reading the code** (#1, #3, #8, #11, #14, #16). Cheap, but depends
-  on someone reading the right lines on the right day. Six of sixteen, which is
+  on someone reading the right lines on the right day. Six of nineteen, which is
   not a system.
 - **Caught by rendering the artifact and looking at it** (#12, #13). Neither a
   threshold nor a test would fire: the script exited 0 and wrote a valid PNG
@@ -48,6 +62,12 @@ to survive undetected, not by how wrong it would have been.
   uniquely durable: the numbers were right, the sentence was wrong, and nothing
   reruns a sentence. A hardcoded verdict in generated prose will eventually
   state the opposite of its own data, and no test asserts on English.
+- **Caught by printing the treatment beside the outcome** (#18, #19). Both
+  would have produced quality numbers that were *correct* for what actually
+  ran, and wrong for what was claimed to have run. Neither is visible in the
+  quality column; both are obvious the moment the reduction percentage and
+  the truncation rate sit in the same table. An ablation that does not report
+  how much treatment it applied cannot be audited.
 - **Caught by external reference** (#4, #5, #6, #7, #9, #10). The expensive
   category, and the **only one that catches errors producing plausible
   numbers**: published ground truth in the HDF5, an independent interleaved
@@ -479,9 +499,18 @@ project, and it is not closed by writing more code.
 | Not built | Gate |
 |---|---|
 | Thermal model, energy model, DVFS tiers | A device trace. This machine can measure neither temperature nor energy — WMI thermal zone is access-denied without elevation, there is no RAPL on Windows, and WSL2 exposes no populated `powercap`. The Android phone is the **only** source. |
-| Selective Content Reduction (C2) | Phase 5; the sentence splitter it shares with chunking is already built. |
 | Bandit policy, Pareto policy, safety shield | Phase 6, which needs the Phase 3 cost model. |
-| Answer generation, EM/F1 | Phase 7. **Confirmed**: `llama-cpp-python` has no usable wheel for any version on CPython 3.12 / win-amd64, so it is a source build needing MSVC — and unlike hnswlib there is no differently-named redistribution to fall back on. This is what blocks C2's quality claim and C3's real comparison. |
+| Battery- and thermal-aware policy (C5) | The same device trace. Nothing in software unblocks it. |
+
+**Answer generation was never actually blocked** (ADR-0043). It was recorded
+here, in `TODO.md` and in the runbook as gated on the MSVC toolchain. That
+finding was real but scoped to the wrong noun: `llama-cpp-python` does need
+MSVC, and this project needs *a generator*, not llama.cpp. `torch` and
+`transformers` have been installed since Phase 1 as dependencies of
+`sentence-transformers` — a CPU generator was available the whole time, and no
+new dependency was added to use it. The blocker was written against the first
+tool tried rather than against the missing capability, and three documents then
+repeated it faithfully for as long as nobody restated the requirement.
 
 The energy and thermal dependency was **identified and recorded in Phase 1**
 (ADR-0007, ADR-0008), before any work was built on top of it — not discovered
@@ -505,8 +534,17 @@ smartann data status                       # exits non-zero if anything is incom
 smartann index build configs/index/sift1m_ecovector.yaml
 python scripts/phase2_acceptance.py --datasets sift1m nytimes
 python scripts/experiment_contention.py
+python scripts/phase7_qa.py --n-questions 1000
 python scripts/make_figures.py
+python scripts/verify_all.py                # all seven, end to end
 ```
+
+`python -m smartann.cli ...` is equivalent to the `smartann` console script.
+It was **not** equivalent until 2026-09-05: `cli.py` had no `__main__` guard, so
+the module form imported the CLI, ran nothing and exited 0. Every runbook
+command used it, and `verify_all.py` routed its data-status check through it and
+scored the silent success as a pass (ADR-0042). Steps now fail if they produce
+no output.
 
 Every run writes `manifest.json` with the git SHA, config hash, library
 versions, hostname, seed, wall-clock bounds and the telemetry capability table.

@@ -1,0 +1,28 @@
+== cpu features ==
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 asimdfhm dit uscat ilrcpc flagm sb paca pacg dcpodp flagm2 frint i8mm bf16 bti
+== step 1: numpy ==
+numpy OK 2.4.4
+rc=0
+== step 2: import hnswlib ==
+/sdcard/iso.sh: line 7:  8037 Illegal instruction     python -c "import hnswlib; print('import OK')"
+rc=132
+== step 3: construct Index ==
+/sdcard/iso.sh: line 9:  8044 Illegal instruction     python -c "import hnswlib; p=hnswlib.Index(space='l2',dim=8); print('ctor OK')"
+rc=132
+== step 4: init_index ==
+/sdcard/iso.sh: line 11:  8055 Illegal instruction     python -c "import hnswlib; p=hnswlib.Index(space='l2',dim=8); p.init_index(max_elements=100,ef_construction=50,M=8); print('init OK')"
+rc=132
+== step 5: add_items ==
+/sdcard/iso.sh: line 16:  8064 Illegal instruction     python -c "
+import numpy as np, hnswlib
+p=hnswlib.Index(space='l2',dim=8); p.init_index(max_elements=100,ef_construction=50,M=8)
+p.add_items(np.random.rand(100,8).astype('float32'), np.arange(100)); print('add OK')"
+rc=132
+== step 6: knn_query ==
+/sdcard/iso.sh: line 22:  8071 Illegal instruction     python -c "
+import numpy as np, hnswlib
+p=hnswlib.Index(space='l2',dim=8); p.init_index(max_elements=100,ef_construction=50,M=8)
+d=np.random.rand(100,8).astype('float32'); p.add_items(d,np.arange(100)); p.set_ef(20)
+l,dd=p.knn_query(d[:3],k=3); print('knn OK', l.shape, dd[0][0])"
+rc=132
+== DONE ==

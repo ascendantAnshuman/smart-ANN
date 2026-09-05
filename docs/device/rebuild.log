@@ -1,0 +1,23 @@
+== rebuilding hnswlib with HNSWLIB_NO_NATIVE=1 ==
+Uninstalling hnswlib-0.8.0:
+  Successfully uninstalled hnswlib-0.8.0
+Building wheels for collected packages: hnswlib
+  Building wheel for hnswlib (pyproject.toml): started
+  Building wheel for hnswlib (pyproject.toml): finished with status 'done'
+  Created wheel for hnswlib: filename=hnswlib-0.8.0-cp314-cp314-android_24_arm64_v8a.whl size=1449128 sha256=eefca73fc33a3bbf704af79b32bd6abf1b591db5c471a1fc74e402b8e44f6aba
+  Stored in directory: /data/data/com.termux/files/usr/tmp/pip-ephem-wheel-cache-zpye_8at/wheels/54/48/f6/bd9aec7940a15fab891fd004077f7ad37141c5653273fb7514
+Successfully built hnswlib
+Installing collected packages: hnswlib
+Successfully installed hnswlib-0.8.0
+BUILD_EXIT=0 SECONDS=19
+== import test ==
+IMPORT_OK
+rc=0
+== functional test ==
+hnswlib ? from /data/data/com.termux/files/usr/lib/python3.14/site-packages/hnswlib.cpython-314-aarch64-linux-android.so
+build 0.04s  query 11.4 us/q  shapes (200, 5) (200, 5)
+self-recall@5 = 1.0000
+l2 squared-distance check: True
+FUNCTIONAL_OK
+rc=0
+== DONE ==

@@ -1,0 +1,10 @@
+== wake lock ==
+wake-lock acquired
+== sustained load, 150s, liveness every 30s ==
+t=30s child ALIVE  {"present":true,"technology":"Li-poly","health":"GOOD","plugged":"PLUGGED_AC","status":"CHARGING","temperature":36.2,"voltage":4317,"current":-106000,"percentage":93,"level":93,"scale":100,"charge_cou
+t=60s child ALIVE  {"present":true,"technology":"Li-poly","health":"GOOD","plugged":"PLUGGED_AC","status":"CHARGING","temperature":36.4,"voltage":4336,"current":110000,"percentage":93,"level":93,"scale":100,"charge_coun
+t=90s child ALIVE  {"present":true,"technology":"Li-poly","health":"GOOD","plugged":"PLUGGED_AC","status":"CHARGING","temperature":36.6,"voltage":4330,"current":46000,"percentage":93,"level":93,"scale":100,"charge_count
+t=120s child ALIVE  {"present":true,"technology":"Li-poly","health":"GOOD","plugged":"PLUGGED_AC","status":"CHARGING","temperature":36.9,"voltage":4334,"current":97000,"percentage":93,"level":93,"scale":100,"charge_count
+t=150s child DEAD -- killed at or before this point
+final child exit=0
+== DONE ==

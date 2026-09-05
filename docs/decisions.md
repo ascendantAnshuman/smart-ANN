@@ -1888,3 +1888,247 @@ CLI. The reported *results* stand. The reported *verification* did not.
 **The rule this adds.** Test the interface the documentation names, through the
 mechanism the documentation names. A CLI tested only in-process is a library
 with a CLI-shaped docstring.
+
+---
+
+## ADR-0043 — Phase 7 was never blocked; the blocker was scoped to the wrong noun
+
+**Status.** Accepted. 2026-09-05.
+
+**What the project believed.** Phase 7 (answer generation) was recorded as
+blocked on the MSVC C++ Build Tools, in `TODO.md`, in `docs/review.md`, and in
+the runbook's gate table. The evidence was solid and remains correct:
+
+```
+uv pip install --only-binary=:all: llama-cpp-python
+  -> all versions of llama-cpp-python have no usable wheels
+```
+
+on CPython 3.12 / win-amd64. Source build only, and unlike hnswlib there is no
+differently-named redistribution — the rung-2 escape that resolved Phase 2
+(ADR-0017) genuinely does not exist for llama.cpp.
+
+**What was wrong with it.** The project needs *a generator*. It does not need
+llama.cpp. `sentence-transformers>=3.0` has been a declared dependency since
+Phase 1 — it is what embedded the 46,369 SQuAD chunks — and it pulls in
+`torch` and `transformers`. Both were installed the whole time:
+
+```
+torch 2.14.0    transformers 5.16.1    tokenizers 0.23.2    safetensors 0.8.0
+```
+
+So a CPU generator was available from the moment Phase 1 finished. The blocker
+was written down against the tool rather than against the capability, and once
+written it was never re-examined — three phase tables and a runbook repeated it
+faithfully.
+
+**Section 4 rule 6 is not engaged.** No dependency is added. `transformers` is
+already installed as a transitive dependency of a declared one; this ADR makes
+that use explicit rather than incidental.
+
+**The model.** `google/flan-t5-base`, greedy decoding, `do_sample=False`,
+CPU, 4 threads. Seq2seq rather than causal because FLAN-T5 answers
+extractively without a chat scaffold, and SQuAD's gold answers are spans — a
+causal model of similar size spends its budget on conversational framing that
+EM punishes, which measures the prompt rather than the retrieval. Greedy
+because C2 compares quality *across* reduction settings, and sampling noise
+would sit inside exactly the difference being measured.
+
+**What this unblocks.** C2's quality claim and C3's real comparison. Until now
+context reduction could be priced only in characters, tokens and milliseconds,
+and on those axes a reduction that deletes the answer is indistinguishable
+from a free one — both look like a win.
+
+**What it does not unblock.** Nothing about energy or thermal state. Those need
+the phone (ADR-0007, ADR-0008), and C4's energy half and C5 entirely remain
+gated on hardware. Phase 7 being available does not move them.
+
+**The rule this adds.** Record a blocker against the *capability* that is
+missing, not against the first tool tried for it. "Needs MSVC" was true of
+`llama-cpp-python` and false of Phase 7, and the difference went unnoticed for
+as long as nobody restated the requirement.
+
+---
+
+## ADR-0044 — An ablation ladder must be validated against the corpus before it is run
+
+**Status.** Accepted. 2026-09-05.
+
+**What happened.** The first Phase 7 run swept four SCR settings — `off`,
+`mild`, `moderate`, `aggressive` — at `window_size=2` with `top_windows` 4, 3,
+2, 1. Three of the four came back **byte-identical to `off`**: same character
+count, same token count, same EM, same F1, 0.0% reduction.
+
+The reducer was not broken. The ladder was. Measured over 3,000 sampled SQuAD
+chunks:
+
+| sentences per chunk | share |
+|---|---|
+| 1 | 1.4% |
+| 2 | 22.6% |
+| 3 | 76.0% |
+
+and the windows those yield:
+
+| window, overlap | chunks yielding exactly one window |
+|---|---|
+| `w=3, o=1` | **100.0%** — cannot reduce at all (ADR-0035) |
+| `w=2, o=1` | 24.0%; the rest yield two, so only `top_windows=1` cuts anything |
+| `w=1, o=0` | 1.4% — the only setting with a real ladder |
+
+At `w=2` a chunk yields at most two windows, so "keep the top 3" and "keep the
+top 4" keep everything. Three rungs of a four-rung ladder were the same rung.
+
+**Why this is the ADR-0037 pattern again.** Those three arms could not have
+differed from the baseline whatever the reducer did. Their outcome was
+independent of the treatment being ablated — the fifth instance in this project
+of a comparison that cannot fail, after an index compared with itself, a
+hardcoded narrative sentence, a tolerance flag accepting every outcome, and a
+verification routed through the entry point it was verifying (ADR-0042).
+
+It is also the most seductive of the five, because the output looked *good*:
+three arms holding quality exactly flat while reducing context reads as "SCR is
+free" rather than "SCR did not run". Had the reduction percentage not been
+printed beside the quality, this would have become a headline result.
+
+**The decision.** The ladder is now `w=1, o=0` with `top_windows` 3/2/1 plus a
+context-extension rung, and the corpus measurement above is recorded in
+`scripts/phase7_qa.py` next to the ladder it justifies. The reduction
+percentage is printed for every arm, so a rung that does not move is visible
+in the same table as the quality it claims to preserve.
+
+**The rule this adds.** Before running an ablation, verify that each rung can
+produce an outcome different from its neighbour **on the actual data**. A
+treatment level the corpus cannot express is not a weak condition; it is the
+control condition wearing a different name.
+
+---
+
+## ADR-0045 — The generation baseline was truncated, which would have made reduction look free
+
+**Status.** Accepted. 2026-09-05.
+
+**What happened.** The first Phase 7 smoke run reported **66.7% of the `off`
+arm truncated**. FLAN-T5's nominal input limit is 512 tokens; the unreduced
+context at `k=5` reaches 589. The tokeniser cut it silently.
+
+**Why it matters more than it looks.** The `off` arm is the baseline every
+reduction arm is measured against. Truncated, it was not "full context" — it
+was "the first 512 tokens", which is itself a context reduction, just a
+position-based one instead of a relevance-based one. Comparing relevance-based
+reduction against position-based reduction of the same size would have shown
+little difference, and the conclusion drawn would have been *"reduction is
+free"* when what actually happened is that the comparison never took place.
+
+**The decision.** `max_input_tokens=1024`. T5 uses relative position bias
+rather than learned absolute embeddings, so it extrapolates past its training
+length; this is the one architecture family where raising the limit is sound
+rather than a silent corruption. Truncation is now 0.0% on every arm.
+
+`GenerationResult.truncated` exists for this and is reported per arm. It is
+computed by tokenising twice — once unbounded to learn the true length, once
+truncated to feed the model — because the difference cannot be recovered after
+the fact.
+
+**The rule this adds.** A baseline that has been silently altered is not a
+baseline. Any pipeline stage that can drop input must report whether it did,
+per arm, in the same table as the result.
+
+---
+
+## ADR-0046 — The device probe: two criticals passed, and a build that succeeds then crashes
+
+**Status.** Accepted. 2026-09-05. All seven pre-declared questions answered;
+raw logs in `docs/device/`.
+
+**It was the cable.** The Phase 3.5a probe recorded `device_reachable: false`
+with the reasoning that Windows enumerated no Android device *at all*, which
+placed the fault upstream of adb and developer options. That held: with a data
+cable the handset appeared immediately. vivo I2304, Android 16, arm64-v8a,
+Snapdragon.
+
+**Q2 — battery current without root: PASS. This is the consequential one.**
+
+The pre-declaration named this the question that could sink a phase rather than
+delay it: *"If [it fails] there is NO measured energy anywhere in this project."*
+
+The sysfs route is dead. Every node under
+`/sys/class/power_supply/battery/` — `current_now`, `voltage_now`,
+`charge_counter` — is unreadable to the adb shell user under Android 16
+SELinux, as are the `uevent` files of `battery`, `bq_bms` and `fg_common`.
+
+`termux-battery-status` works, because it goes through BatteryManager rather
+than the filesystem. The declared test was whether the value **moves** under
+load, since a constant or zero reading is not an energy source. It moves:
+
+```
+idle        current -215000 uA   voltage 4331 mV   35.0 C
+under load  current -104000 uA   voltage 4311 mV   35.1 C
+```
+
+**There is a measured energy path in this project.** C4's energy half and C5 are
+not sunk, and Phase 3's energy criterion is achievable as scoped.
+
+**The sign is not usable yet.** Across Q5's run, under *continuous* load, the
+field read −106000, +110000, +46000, +97000 µA at 30-second intervals. Magnitude
+tracks load; the sign flips as the charger modulates. Every reading in this probe
+was taken while charging, because USB was the only transport at the time. **The
+convention must be re-established from an unplugged device before a single joule
+is reported**, and wireless adb exists so the cable can come out.
+
+**Q1 — hnswlib under Termux: PASS, and the failure mode is the finding.**
+
+hnswlib 0.8.0 compiles in 19 s with clang 21.1.8 and produces a wheel. pip
+reports success. Exit code 0. **And `import hnswlib` dies with SIGILL before
+executing a line.** Every later step fails identically because none is reached.
+
+`setup.py` compiles with `-march=native`, and clang targeting this core emitted
+an instruction it does not implement — `/proc/cpuinfo` lists no SVE.
+`HNSWLIB_NO_NATIVE=1` fixes it completely: import OK, self-recall@5 = 1.0000
+against brute force, 11.4 µs per query, and `l2` returns squared distance as
+ADR-0018 requires.
+
+**Both builds exit 0.** This pre-declaration required *"a functional
+`knn_query` check rather than just an import"*, and that clause is the only
+reason this was caught. A build-status check would have certified a library that
+crashes on import — the same shape as ADR-0042, where a step's verdict did not
+depend on what it was checking. Every device-side build MUST set
+`HNSWLIB_NO_NATIVE=1`, in the setup script, not in someone's memory.
+
+**Q3 — CPU topology: ANSWERED, and it contradicts `types.py`.**
+
+Eight cores in **three** frequency domains: cpu0–2 at 2.016 GHz, cpu3–6 at
+2.803, cpu7 at 3.187. One instantaneous sample held four different ratios at
+once: 1.00, 0.61, 0.22, 0.27.
+
+`DeviceState.freq_ratio` is a single scalar and **this device has no single
+clock ratio to report**. Which ratio a query experiences depends on where the
+Android scheduler placed the thread — something this project neither controls
+nor observes from inside the process. **No fix is applied here**: changing
+`types.py` needs the supervisor's go-ahead, and the honest options (per-cluster
+vector, the ratio of the core actually used, or a documented worst case) differ
+in what the controller would be permitted to claim.
+
+**Q4 — thermal: PASS.** 110 zones readable without root: `cpuss-0..3`
+40.6–41.4 °C, `cpu-1-*` 38.6–41.8 °C, `gpuss-*` 35.8–37.0 °C, `skin-msm-therm`
+32.7 °C, battery 31.0 °C. Battery temperature rose monotonically under load
+during Q5 (36.2 → 36.9 °C), so the signal Phase 4 must fit is real and visible.
+
+Two things recorded rather than guessed. **21 of the 110 zones report −273000**
+— absolute zero, i.e. a disabled sensor — and any aggregate that does not filter
+them is wrong in the direction that looks like a cold device. And **there is no
+single "SoC package" zone**: four `cpuss` and fourteen `cpu-*` sensors disagree
+by 3.2 °C at idle. Which one maps to `temperature_c` is a choice to declare and
+defend, which is exactly what the pre-declaration said to record rather than
+resolve by guessing.
+
+**Q5 — sustained load: PASS at 150 s, and not one second more.** Wake lock
+acquired; the child was alive at 30/60/90/120 s and its `exit=0` at 150 s is
+*completion*, not a kill — a kill surfaces as 137. Noted because the liveness
+probe alone cannot tell those apart at the boundary. This is the 2-minute smoke
+test that was asked for. It is **not** evidence for Phase 3.5's 30 minutes, it
+spawned one child where Android 12+'s phantom-process killer targets many, and
+Termux 0.118.3 predates this handset's Android 16 by four major versions.
+
+**Phase 3.5 decision: GO**, on two conditions — the trace is taken unplugged,
+and the 30-minute multi-process case is verified before it is relied on.

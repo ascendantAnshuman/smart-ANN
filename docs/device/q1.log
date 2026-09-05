@@ -1,0 +1,56 @@
+== START Sat Sep  5 11:08:35 IST 2026 ==
+== toolchain ==
+No schema files found: doing nothing.
+Setting up cmake (4.4.3) ...
+Setting up lld (21.1.8-3) ...
+Setting up pkg-config (0.29.2-3) ...
+Setting up llvm (21.1.8-3) ...
+Setting up clang (21.1.8-3) ...
+python: Python 3.14.6
+clang:  clang version 21.1.8
+numpy:  2.4.4
+== pip build deps ==
+Downloading packaging-26.3-py3-none-any.whl (129 kB)
+Installing collected packages: setuptools, pybind11, packaging, wheel
+
+Successfully installed packaging-26.3 pybind11-3.1.0 setuptools-84.0.0 wheel-0.48.0
+== BUILDING hnswlib FROM SOURCE ==
+Collecting hnswlib
+  Downloading hnswlib-0.8.0.tar.gz (36 kB)
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: numpy in /data/data/com.termux/files/usr/lib/python3.14/site-packages (from hnswlib) (2.4.4)
+Building wheels for collected packages: hnswlib
+  Building wheel for hnswlib (pyproject.toml): started
+  Building wheel for hnswlib (pyproject.toml): finished with status 'done'
+  Created wheel for hnswlib: filename=hnswlib-0.8.0-cp314-cp314-android_24_arm64_v8a.whl size=1448263 sha256=c7d5dd7cb46b4bae8632a513e3beb7782947df916bfad42aefb5ac9c38e3079e
+  Stored in directory: /data/data/com.termux/files/home/.cache/pip/wheels/54/48/f6/bd9aec7940a15fab891fd004077f7ad37141c5653273fb7514
+Successfully built hnswlib
+Installing collected packages: hnswlib
+Successfully installed hnswlib-0.8.0
+BUILD_EXIT=0  SECONDS=18
+== FUNCTIONAL CHECK (not just import) ==
+/sdcard/q1.sh: line 38:   381 Illegal instruction     python - <<'PY' 2>&1
+import numpy as np
+try:
+    import hnswlib
+except Exception as e:
+    print("IMPORT_FAILED:", e); raise SystemExit(1)
+print("hnswlib imported from", hnswlib.__file__)
+d, n = 16, 2000
+rng = np.random.default_rng(0)
+data = rng.random((n, d)).astype(np.float32)
+p = hnswlib.Index(space="l2", dim=d)
+p.init_index(max_elements=n, ef_construction=100, M=16)
+p.add_items(data, np.arange(n))
+p.set_ef(50)
+lab, dist = p.knn_query(data[:5], k=5)
+exact = ((data[:5][:,None,:]-data[None,:,:])**2).sum(-1)
+gt = np.argsort(exact, axis=1)[:, :5]
+recall = np.mean([len(set(lab[i]) & set(gt[i]))/5 for i in range(5)])
+print("knn_query OK, shapes", lab.shape, dist.shape)
+print("self-recall@5 =", recall)
+print("FUNCTIONAL_OK" if recall > 0.9 else "FUNCTIONAL_SUSPECT")
+PY
+
+== DONE Sat Sep  5 11:11:30 IST 2026 ==

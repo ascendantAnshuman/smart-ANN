@@ -1,0 +1,54 @@
+== date ==
+Sat Sep  5 11:06:02 IST 2026
+== pkg update ==
+Get:1 https://plug-mirror.rcac.purdue.edu/termux/termux-main stable InRelease [14.0 kB]
+Get:2 https://plug-mirror.rcac.purdue.edu/termux/termux-main stable/main aarch64 Packages [576 kB]
+Fetched 590 kB in 3s (172 kB/s)
+Reading package lists...
+Building dependency tree...
+74 packages can be upgraded. Run 'apt list --upgradable' to see them.
+== install termux-api ==
+After this operation, 373 kB of additional disk space will be used.
+Get:1 https://plug-mirror.rcac.purdue.edu/termux/termux-main stable/main aarch64 termux-api aarch64 0.59.1-1 [28.9 kB]
+Fetched 28.9 kB in 1s (19.7 kB/s)
+Selecting previously unselected package termux-api.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 4470 files and directories currently installed.)
+Preparing to unpack .../termux-api_0.59.1-1_aarch64.deb ...
+Unpacking termux-api (0.59.1-1) ...
+Setting up termux-api (0.59.1-1) ...
+== which termux-battery-status ==
+/data/data/com.termux/files/usr/bin/termux-battery-status
+== READING 1 (idle) ==
+{
+  "present": true,
+  "technology": "Li-poly",
+  "health": "GOOD",
+  "plugged": "PLUGGED_AC",
+  "status": "CHARGING",
+  "temperature": 35.0,
+  "voltage": 4331,
+  "current": -215000,
+  "percentage": 92,
+  "level": 92,
+  "scale": 100,
+  "charge_counter": 1669000,
+  "cycle": 1157
+}
+== 15s CPU load ==
+== READING 2 (under load) ==
+{
+  "present": true,
+  "technology": "Li-poly",
+  "health": "GOOD",
+  "plugged": "PLUGGED_AC",
+  "status": "CHARGING",
+  "temperature": 35.1,
+  "voltage": 4311,
+  "current": -104000,
+  "percentage": 92,
+  "level": 92,
+  "scale": 100,
+  "charge_counter": 1668000,
+  "cycle": 1157
+}
+== DONE ==

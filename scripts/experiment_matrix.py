@@ -7,12 +7,18 @@ on SQuAD because SQuAD is the only prepared dataset with chunk TEXT -- SIFT and
 NYTimes are vector-only, and SCR has nothing to reduce without text.
 
 **This is a COST-ONLY study and is labelled as one everywhere it is written.**
-SCR's actual claim is answer quality per token, and answer quality needs a
-generator; Phase 7 is blocked on the MSVC toolchain (confirmed: no
-`llama-cpp-python` wheel exists for any version on this platform). So the matrix
-measures latency, recall and context size. It does NOT measure whether the text
-SCR discarded was needed, and no arm here should be read as evidence that it
-was not.
+It measures latency, recall and context size. It does NOT measure whether the
+text SCR discarded was needed, and no arm here should be read as evidence that
+it was not.
+
+That limit is now a deliberate scope choice rather than a blocker. When this
+was written, Phase 7 was believed blocked on the MSVC toolchain; it was not
+(ADR-0043) -- the blocker applied to `llama-cpp-python`, not to generation, and
+`transformers` had been installed since Phase 1. Quality is measured in
+`scripts/phase7_qa.py` and the joint quality/cost surface in
+`scripts/phase8_joint.py`. Generation is kept OUT of this script on purpose:
+at roughly 500 ms per answer it would dominate the per-query latency the
+controller reacts to, and this experiment exists to study the control loop.
 """
 
 from __future__ import annotations

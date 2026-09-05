@@ -164,6 +164,19 @@ Each writes `queries.parquet` + `manifest.json` under `C:\smartann-results\`.
 & $PY scripts\fit_cost_model.py                                # ~5 s
 ```
 
+**Phase 7 and 8 — answer quality.** These load `google/flan-t5-base` (~1 GB,
+downloaded once to the HuggingFace cache) and generate on CPU, so they are slow
+and must run alone like every other measurement:
+
+```powershell
+& $PY scripts\phase7_qa.py --n-questions 1000     # SCR ladder vs EM/F1, ~2 h
+& $PY scripts\phase8_joint.py --n-questions 250   # C3 joint surface, ~1 h
+```
+
+Both take `--n-questions` and are worth smoke-testing at `--n-questions 12`
+first; the ladder and the truncation columns show up immediately at that size,
+even though the quality numbers do not mean anything yet.
+
 ---
 
 ## 6. Figures
@@ -187,29 +200,61 @@ hardcoded result (Section 3, rule 1).
 | `C:\smartann-results\` | one directory per run: parquet + manifest |
 | `results\` (in repo) | figures, profile table, cost model, verification |
 | `docs\review.md` | the report: status, results, findings, what is blocked |
-| `docs\decisions.md` | 42 ADRs — the reasoning behind every non-obvious choice |
+| `docs\decisions.md` | 46 ADRs — the reasoning behind every non-obvious choice |
 
 Neither `data/` nor `results/` is committed.
 
 ---
 
-## 8. What is blocked, and what unblocks it
+## 8. The device, and what is left
 
-| Phase | Needs |
+**All seven feasibility questions are answered** (ADR-0046,
+`docs/predeclared/device_feasibility.json`, raw logs in `docs/device/`). Phase
+3.5 is **GO**. Phase 7 was never blocked (ADR-0043).
+
+| Phase | State |
 |---|---|
-| 3.5 device trace, 9 validation | A phone reachable over USB. `adb` is installed at `C:\Users\HP\platform-tools\adb.exe`; Windows currently enumerates **no** Android device at all, which points at the **cable** before anything else. Then USB debugging, then tap "Allow" on the handset. Termux must be the F-Droid or GitHub build — the Play Store one's `pkg install` is broken. |
-| 4 simulator | Phase 3.5's trace. Thermal constants must be **fitted** from a real trace, never chosen. |
-| 7 generation | MSVC C++ Build Tools, elevated install. Confirmed necessary: `llama-cpp-python` has no wheel for any version on cp312/win-amd64, and unlike hnswlib there is no differently-named redistribution to fall back on. |
+| 3.5 device trace | **GO**, on two conditions below |
+| 4 simulator | Needs 3.5's trace. Thermal constants must be **fitted**, never chosen |
+| 9 validation | Needs 3.5 first |
 
-Once the phone is connected, one command answers all seven blocking questions:
+### The device
+
+vivo I2304, Android 16, arm64-v8a, Snapdragon, 8 cores in 3 frequency domains.
 
 ```powershell
-& C:\Users\HP\platform-tools\adb.exe push scripts\device_probe.sh /sdcard/
-# then, in Termux ON THE PHONE:
-#   bash /sdcard/device_probe.sh 2>&1 | tee /sdcard/device_probe.log
+& C:\Users\HP\platform-tools\adb.exe devices -l
+& C:\Users\HP\platform-tools\adb.exe connect 172.16.23.203:5555   # wireless
 ```
 
-Two of those seven can **sink** a phase rather than delay it: whether hnswlib
-builds under Termux, and whether battery current is readable without root. If
-the second fails there is no measured energy anywhere in this project, and
-C4/C5 need rescoping rather than postponing.
+Termux 0.118.3 and Termux:API 0.53.0 are installed. Push a script to `/sdcard/`
+and run it from the Termux prompt; Termux has storage permission, so it can
+write logs back to `/sdcard/` for `adb` to read.
+
+### Two rules for any device work
+
+**1. `HNSWLIB_NO_NATIVE=1` is mandatory.** Without it hnswlib builds
+successfully -- exit 0, wheel produced -- and then dies with SIGILL on
+`import`, because `-march=native` emits an instruction this core lacks. Both
+builds report success; only running the code tells them apart.
+
+```sh
+HNSWLIB_NO_NATIVE=1 pip install --no-build-isolation hnswlib
+```
+
+**2. Measure unplugged.** Battery current is readable without root via
+`termux-battery-status`, and its magnitude responds to load. But its **sign is
+unstable while charging** -- it read -106000, +110000, +46000, +97000 uA at
+30-second intervals under continuous load. Every reading so far was on AC. The
+convention must be re-established from a discharging device before any energy
+figure is reported. Wireless adb exists so the cable can come out.
+
+### Still open
+
+- **`DeviceState.freq_ratio` is a single scalar and this SoC has three clock
+  domains** -- one sample held ratios 1.00, 0.61, 0.22 and 0.27 at once. A
+  `types.py` change needs the supervisor's go-ahead, so nothing was changed.
+- **Q5 passed at 150 s with one child process.** Phase 3.5 needs 30 minutes,
+  and Android 12+'s phantom-process killer targets many children.
+- **21 of 110 thermal zones read -273000** (disabled sensors). Filter them, or
+  any aggregate reads as a cold device.

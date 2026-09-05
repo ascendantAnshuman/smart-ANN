@@ -392,6 +392,66 @@ def fig_footprint(accept_json: Path, out: Path) -> None:
     print(f"wrote {out}", flush=True)
 
 
+def fig_scr_quality(qa_json: Path, out: Path) -> None:
+    """C2's trade-off: what context reduction costs in answer quality.
+
+    The whole point of Phase 7. Every earlier SCR measurement priced reduction
+    in characters, tokens and milliseconds, and on those axes a reduction that
+    deletes the answer looks exactly like a free one. Here the vertical axis is
+    quality, so a destructive setting falls and a free one does not.
+
+    Error bars are the paired bootstrap against `off` re-centred on each arm's
+    own mean: the arms answer the SAME questions, so the pairing is real and an
+    unpaired interval would discard it. An interval crossing the baseline line
+    means this experiment cannot distinguish that arm from full context.
+    """
+    d = json.loads(qa_json.read_text(encoding="utf-8"))
+    arms = d["arms"]
+    paired = {p["arm"]: p for p in d["paired_bootstrap_vs_off"]}
+    base_f1 = next(a["f1"] for a in arms if a["arm"] == "off")
+
+    red = [a["reduction_pct"] for a in arms]
+    f1 = [a["f1"] for a in arms]
+    gen = [a["t_generate_ms_mean"] for a in arms]
+    names = [a["arm"] for a in arms]
+
+    lo, hi = [], []
+    for a in arms:
+        if a["arm"] == "off":
+            lo.append(0.0)
+            hi.append(0.0)
+        else:
+            c = paired[a["arm"]]["d_f1_ci"]
+            lo.append(a["f1"] - (a["f1"] + (c[0] - paired[a["arm"]]["d_f1"])))
+            hi.append((a["f1"] + (c[1] - paired[a["arm"]]["d_f1"])) - a["f1"])
+
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+
+    ax.errorbar(red, f1, yerr=[lo, hi], fmt="o-", color="#0353a4", capsize=4, lw=1.5)
+    ax.axhline(base_f1, color="#adb5bd", ls="--", lw=1, label="full context (off)")
+    for x, y, n in zip(red, f1, names, strict=True):
+        ax.annotate(n, (x, y), textcoords="offset points", xytext=(6, 6), fontsize=8)
+    ax.set_xlabel("context removed (%)")
+    ax.set_ylabel("token F1")
+    ax.set_title(
+        f"Answer quality against reduction\n"
+        f"SQuAD, n={d['n_questions']}, {d['generator']['model_id']}, greedy",
+        fontsize=9,
+    )
+    ax.legend(fontsize=8)
+
+    ax2.plot(red, gen, "o-", color="#c1121f", lw=1.5)
+    for x, y, n in zip(red, gen, names, strict=True):
+        ax2.annotate(n, (x, y), textcoords="offset points", xytext=(6, 6), fontsize=8)
+    ax2.set_xlabel("context removed (%)")
+    ax2.set_ylabel("mean generation latency (ms)")
+    ax2.set_title("What the reduction buys\n(this laptop, not the target device)", fontsize=9)
+
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"wrote {out}", flush=True)
+
+
 def fig_regime(regime_json: Path, out: Path) -> None:
     """Wall-clock cost of the graphs against MobileRAG's own condition.
 
@@ -498,6 +558,7 @@ def main() -> int:
         ("recall_effort", fig_recall_effort, out.parent / "phase2_summary.json"),
         ("footprint", fig_footprint, out.parent / "phase2_summary.json"),
         ("regime", fig_regime, out.parent / "regime_summary.json"),
+        ("scr_quality", fig_scr_quality, out.parent / "phase7" / "qa_summary.json"),
     ):
         if name not in wanted:
             continue

@@ -18,17 +18,23 @@ entry here will fail the suite rather than sit unnoticed.
 |---|---|
 | 3.5 device trace | The phone. `scripts/device_probe.sh` answers all seven questions in one Termux run. |
 | 4 simulator | Phase 3.5's trace. Thermal constants must be FITTED from a real trace, never chosen. |
-| 7 generation | MSVC Build Tools (elevated install). |
 | 9 device validation | The phone, same gate as 3.5. |
+
+**Phase 7 is done and was never actually blocked** (ADR-0043). The blocker was
+recorded against `llama-cpp-python`, which does need MSVC, rather than against
+the capability. `transformers` and `torch` have been installed since Phase 1 as
+transitive dependencies of `sentence-transformers`, so a CPU generator was
+available the whole time. `scripts/phase7_qa.py` runs SQuAD end-to-end on
+`google/flan-t5-base` and scores EM/F1.
 
 ## Known blockers (not stubs)
 
-- **Phase 7 (generation) needs the MSVC C++ Build Tools. CONFIRMED, not assumed.**
-  `uv pip install --only-binary=:all: llama-cpp-python` on CPython 3.12.14 /
-  win-amd64 reports *"all versions of llama-cpp-python have no usable wheels"*.
-  Source build only, and unlike hnswlib there is no differently-named
-  redistribution to fall back on -- the rung-2 escape that resolved Phase 2
-  (ADR-0017) does not exist here. Install from an ADMIN PowerShell:
+- **MSVC is still needed for `llama-cpp-python` specifically**, and that finding
+  stands: `uv pip install --only-binary=:all: llama-cpp-python` on CPython
+  3.12.14 / win-amd64 reports *"all versions have no usable wheels"*. It is no
+  longer a project blocker, because Phase 7 does not require llama.cpp -- only
+  a generator. Should a GGUF quantised model ever be wanted for on-device
+  parity, install from an ADMIN PowerShell:
 
   ```powershell
   winget install --id Microsoft.VisualStudio.2022.BuildTools `
