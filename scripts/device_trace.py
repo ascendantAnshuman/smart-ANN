@@ -73,7 +73,7 @@ def read_zones() -> tuple[float, float]:
 
 def read_battery() -> dict:
     out = subprocess.run(
-        [BATTERY_BIN], capture_output=True, text=True, timeout=25, check=False
+        [BATTERY_BIN], capture_output=True, text=True, timeout=8, check=False
     ).stdout
     lo, hi = out.find("{"), out.rfind("}")
     if lo < 0 or hi <= lo:
@@ -84,11 +84,13 @@ def read_battery() -> dict:
 class Sampler(threading.Thread):
     """Background telemetry. The query loop never blocks on it."""
 
-    def __init__(self, period_s: float, out_path: Path) -> None:
+    def __init__(self, period_s: float, out_path: Path, give_up_after: int = 3) -> None:
         super().__init__(daemon=True)
         self.period_s = period_s
         self.out_path = out_path
+        self.give_up_after = give_up_after
         self.rows: list[dict] = []
+        self._battery_fails = 0
         self._stop = threading.Event()
 
     def run(self) -> None:
@@ -96,8 +98,20 @@ class Sampler(threading.Thread):
             t = time.time()
             pref, hottest = read_zones()
             row = {"t": t, "skin_c": pref, "hottest_c": hottest}
+            if self._battery_fails >= self.give_up_after:
+                # Battery reads block for their full timeout when Termux:API is
+                # unreachable, which would drag THERMAL sampling down to one
+                # sample per timeout as well. Thermal comes from sysfs and is
+                # unaffected by whatever ails the API, so after a few failures
+                # the sampler stops asking and keeps the signal it can still
+                # get at full rate. Recorded per row, so the gap is visible.
+                row["battery_error"] = "skipped: battery source gave up"
+                self.rows.append(row)
+                self._stop.wait(self.period_s)
+                continue
             try:
                 b = read_battery()
+                self._battery_fails = 0
                 row.update(
                     current_ua=b.get("current"),
                     voltage_mv=b.get("voltage"),
@@ -109,6 +123,7 @@ class Sampler(threading.Thread):
             except Exception as exc:
                 # A failed read is missing data, not zero power. Recorded as
                 # such so a gap in the trace is visible rather than imputed.
+                self._battery_fails += 1
                 row["battery_error"] = str(exc)[:120]
             self.rows.append(row)
             self._stop.wait(self.period_s)

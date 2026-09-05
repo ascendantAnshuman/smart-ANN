@@ -2401,3 +2401,92 @@ project's established meaning for "not measured", rather than 0.0, which would
 read as "no memory used" and silently satisfy the Phase 2 footprint check.
 Building an index without psutil raises instead, because a build that cannot
 record its own peak memory should not pretend to.
+
+---
+
+## ADR-0051 — Phase 4: a thermal model fitted from a measured device trace
+
+**Status.** Accepted. 2026-09-05. `results/thermal_model.json`, trace in
+`results/device/`.
+
+**The debt this pays.** ADR-0007 and ADR-0008 recorded in Phase 1 that thermal
+ground truth exists only on the handset, and every phase since refused to pick
+thermal constants rather than measure them. 19,144 queries over 25.0 minutes on
+the vivo I2304, sweeping `nprobe` 1→32 round-robin, with 478 thermal samples.
+Skin temperature rose **32.90 → 37.51 °C**.
+
+**The model.** First-order lumped thermal mass, discretised:
+
+```
+dT/dt = a·work_rate + b·(T − T_ref) + c
+      = +9.143e-04·work − 1.473e-02·(T − 34.57) − 1.421e-01
+```
+
+**τ = 68 s.** That is the number a controller needs: how long a change in
+retrieval effort takes to appear in temperature.
+
+**The differencing window is an analysis choice, and it moves R² sixfold.**
+
+| window | n | R² | a | τ |
+|---|---|---|---|---|
+| 3 s | 446 | 0.109 | 6.08e-04 | 107 s |
+| 15 s | 89 | 0.230 | 9.43e-04 | 67 s |
+| **30 s** | **44** | **0.304** | **9.14e-04** | **68 s** |
+| 60 s | 22 | 0.187 | 5.94e-04 | 97 s |
+| 120 s | 11 | 0.691 | 8.69e-04 | 76 s |
+
+The whole sweep is reported, because presenting one row would conceal that the
+answer depends on a choice no reader would think to question. **The 120 s row is
+excluded from the headline despite scoring highest**: eleven points against
+three free parameters is a number that flatters itself.
+
+**Why short windows fail.** Skin rose 4.6 °C over 25 minutes — about
+0.003 °C/s — while differencing adjacent 3-second samples yields a dT/dt with
+standard deviation 0.051 °C/s, **sixteen times the signal**. The sensor
+quantises at ~0.005 °C, so 3-second differencing measures quantisation rather
+than physics.
+
+**The result that matters is the stability, not the R².** τ stays within
+67–107 s and `a` within 5.9–9.4e-04 across every window, while R² swings from
+0.11 to 0.69. Point estimates that barely move across analysis choices are
+better evidence than any single goodness-of-fit, and R² = 0.30 is honestly what
+a first-order model achieves against a noisy sensor over 25 minutes.
+
+**A diagnosis that was wrong, recorded because it was plausible.** The first
+reading of R² = 0.11 was that round-robin interleaving had flattened the input:
+every 3-second interval contains all five effort levels, so work_rate should
+barely vary. Checked rather than assumed — work_rate has CV 0.21, range 92–242,
+and a cooling-term-only fit scores **R² = 0.0002**, meaning work_rate carries
+*all* the explanatory power. The interleaving was not the problem; sensor noise
+was. ADR-0030's interleaving requirement and thermal identifiability do not
+conflict after all, which is worth knowing before someone "fixes" the trace
+design.
+
+**What this model cannot support.** The handset was **charging** throughout, as
+93 host-side power samples confirm (`usb: true`, no state change). Charging heat
+is absorbed into `c`, so `c` is not the device's idle thermal state. All 478
+battery reads failed — Termux:API was not installed — so **no energy was
+measured**, and C4's energy half stays undemonstrated. The first 120 s are
+trimmed: the cable was pulled and reattached during them.
+
+**Per-effort latency, on the device, for the first time:**
+
+| nprobe | p50 | p95 |
+|---|---|---|
+| 1 | 5.59 ms | 13.82 ms |
+| 4 | 20.50 ms | 52.26 ms |
+| 8 | 40.46 ms | 101.46 ms |
+| 16 | 82.61 ms | 189.82 ms |
+| 32 | 169.21 ms | 354.10 ms |
+
+Clean linear scaling in `nprobe`, and roughly **13× slower than the laptop** at
+matched settings — which is the gap that makes adaptive effort worth having on
+a phone at all.
+
+**The consequence for C1, stated plainly.** τ = 68 s means a thermally-aware
+controller must act on a period of that order or longer. The Phase 6 collapse
+happened because the control period was shorter than the observation delay
+(ADR-0032); this measurement says the thermal loop's delay is **68 seconds**,
+not milliseconds. Any thermal controller sampling faster than that will
+reproduce the same collapse, and now there is a measured number saying so
+instead of an argument.
