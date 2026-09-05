@@ -16,9 +16,9 @@ entry here will fail the suite rather than sit unnoticed.
 
 | Phase | Needs |
 |---|---|
-| 3.5 device trace | The phone. `scripts/device_probe.sh` answers all seven questions in one Termux run. |
+| 3.5 device trace | NOT RUN. Everything is staged: index on the handset at recall parity with the host, thermal sampling working, energy sign calibrated. `scripts/device_trace.py` runs it. |
 | 4 simulator | Phase 3.5's trace. Thermal constants must be FITTED from a real trace, never chosen. |
-| 9 device validation | The phone, same gate as 3.5. |
+| 9 device validation | Phase 3.5's trace first. |
 
 **Phase 7 is done and was never actually blocked** (ADR-0043). The blocker was
 recorded against `llama-cpp-python`, which does need MSVC, rather than against
@@ -41,18 +41,18 @@ available the whole time. `scripts/phase7_qa.py` runs SQuAD end-to-end on
     --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
   ```
 
-- **Phases 3.5, 4 and 9 are gated on the device feasibility probe**
-  (`docs/predeclared/device_feasibility.json`). Six of seven questions are
-  BLOCKED on device access. `adb` is now installed at
-  `C:/Users/HP/platform-tools/adb.exe` and works, but no phone enumerates on USB
-  -- Windows itself sees no Android device, which points at the cable or port
-  rather than at adb or developer options. `scripts/device_probe.sh` answers all
-  seven in one Termux run once a device is reachable.
+- **The device feasibility probe is COMPLETE: all seven questions answered**
+  (`docs/predeclared/device_feasibility.json`, ADR-0046). Both critical ones
+  passed. hnswlib builds and runs on the handset, and battery current is
+  readable without root and responds to load. Phase 3.5 is GO.
 
-  Two of the seven can sink a phase rather than delay it: whether hnswlib builds
-  under Termux, and whether battery current is readable without root. If the
-  second fails there is no measured energy anywhere in the project, and Phase 3's
-  energy criterion becomes unachievable as scoped rather than merely hard.
+  Two conditions carry into every device measurement:
+  - **`HNSWLIB_NO_NATIVE=1` is mandatory.** Without it the build succeeds and
+    the library SIGILLs on import.
+  - **Measure unplugged.** The current's sign is unstable on AC (ADR-0047).
+
+  And the centroid graph must be rebuilt on-device: HNSW binaries do not
+  transfer between chroma-hnswlib and upstream hnswlib (ADR-0050).
 
 - **Thermal and energy ground truth exist only on the Android phone**
   (ADR-0007, ADR-0008). This machine can measure neither.

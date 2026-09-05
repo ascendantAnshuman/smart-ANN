@@ -444,10 +444,15 @@ passes per query at k=5. Every SCR arm violates its budget outright, and the
 joint cell is *worse* than either single dimension: adaptation cannot recover a
 cost that large.
 
-This is **cost-only**. SCR's actual claim is answer quality per token, and that
-needs a generator; Phase 7 is blocked. Whether 30% fewer tokens ever repays 67x
-the latency is exactly the question this project currently cannot answer, and
-none of the above should be read as evidence either way.
+This is **cost-only**, and it is no longer the last word. Phase 7 was never
+actually blocked (ADR-0043) and section 6e now carries the quality numbers this
+table could not produce. Read together they answer the question: **SCR as
+implemented cannot pay for itself.** It costs ~1220 ms p95 on the query path to
+save ~300 ms of generation, and every reduction level costs answer quality.
+
+The escape is not adaptation but precomputation -- the corpus is static, so
+window embeddings could be built at index time, which is the difference between
+the ~1220 ms measured here and the ~8 ms measured warm in 6e.
 
 One configuration finding worth carrying (ADR-0035): a first run reported **0.0%
 reduction** while paying full cost, because 99.3% of SQuAD chunks hold ≤3
