@@ -1809,3 +1809,82 @@ to do. All three were caught by reading a number that looked wrong.
 **The design rule.** An escape hatch should say *what is expected*, never *ignore
 the result*. `expect_codes=(0, 1)` and `expect_zero=False` differ only when
 something unexpected happens, which is precisely the case the check exists for.
+
+---
+
+## ADR-0042 — The CLI entry point was a no-op, and the verification scored it as a pass
+
+**Status.** Accepted. Found 2026-09-05, by a user pasting a documented command
+into their own terminal and getting nothing back.
+
+**What was wrong.** `smartann/cli.py` defined a Typer `app` and thirty-odd
+commands, and never called `app()`. There was no `if __name__ == "__main__"`
+guard and no `smartann/__main__.py`. So:
+
+```
+> python -m smartann.cli data status
+>                                     # no output
+> echo $LASTEXITCODE
+0
+```
+
+Python imported the module, executed every decorator, bound every command, ran
+none of them, and exited **0**. Every command in `docs/RUNBOOK.md` used this
+form. All of them did nothing, silently, successfully.
+
+The console script worked the whole time — `pyproject.toml` declares
+`smartann = "smartann.cli:app"`, and that path invokes `app` directly. So the
+indexes and experiments this project reports were genuinely built and genuinely
+run. What was broken was the *documented* invocation, and only that.
+
+**Why it survived thirty-nine commits.** `tests/test_cli.py` uses Typer's
+`CliRunner`, which calls `app` in-process. That exercises the one path that was
+never broken. The bug lived exclusively in the gap between how the tests invoke
+the CLI and how the docs tell a human to.
+
+`scripts/verify_all.py` should have caught it and instead certified it. Its
+data-status step ran `[PY, "-m", "smartann.cli", "data", "status"]` and checked
+`returncode in expect_codes`. The no-op returned 0. The step went green. **The
+one check aimed at "do the documented entry points still work" was itself
+routed through the broken entry point**, and reported 7/7.
+
+**What the fix exposed.** With the entry point repaired, `data status` ran for
+the first time and exited **1**: 13,154 files on disk with no manifest entry,
+all inside built index directories. That check had never once executed.
+
+Indexes are build outputs — reproducible from `(config.yaml, seed)`, rebuilt
+routinely, and each root already stores a `meta.json` naming its config hash.
+Hashing 13,154 files into the data manifest would record the same provenance
+twice and churn on every rebuild. So `unrecorded_files()` now skips an index
+root **conditionally on that `meta.json` existing**; a root without one is a
+half-written build and its files are still reported. `data status` now exits 0.
+
+**The decision.** Three changes, none of them the obvious one:
+
+1. `if __name__ == "__main__": app()` in `cli.py`, plus `smartann/__main__.py`
+   so `python -m smartann` works too. Both forms, because the runbook documents
+   one and a reader would try the other.
+2. `tests/test_entrypoint.py` runs both entry points **as subprocesses** and
+   asserts stdout is non-empty. An in-process runner cannot catch this class of
+   bug by construction. The sharpest assertion is that an unknown subcommand
+   exits non-zero — the broken entry point exited 0 for every argument list ever
+   passed to it, including nonsense, because it never parsed one.
+3. `verify_all.py` now fails any step that produces **no output at all**. This
+   is the general form: an exit code is a claim, output is evidence, and a step
+   that reproduced something says so.
+
+**The pattern, for the fourth time.** ADR-0037 named it: *a check whose outcome
+does not depend on what it is checking*. The three prior instances were an index
+compared with itself, a hardcoded narrative sentence, and a tolerance flag that
+accepted every outcome. This one is worse than all three, because the check was
+correct and complete — it simply asked its question through a channel that could
+only ever answer yes.
+
+**What it costs to state honestly.** The 7/7 reported in ADR-0037 was 6/7 with
+one vacuous pass. No measurement in this project changes: the acceptance checks,
+the profile sweep and the policy comparison all run through `scripts/`, not the
+CLI. The reported *results* stand. The reported *verification* did not.
+
+**The rule this adds.** Test the interface the documentation names, through the
+mechanism the documentation names. A CLI tested only in-process is a library
+with a CLI-shaped docstring.

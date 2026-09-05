@@ -27,6 +27,23 @@ Bash must *not* have the `&`, where it means "run in the background".
 Commands below are given for **PowerShell**. For Git Bash, drop the leading `&`
 and use forward slashes.
 
+**Paste only the lines inside the code blocks.** Prose describing what a command
+should print is not a command; PowerShell will try to run it and report
+`The term 'every' is not recognized as the name of a cmdlet`.
+
+There are two equivalent ways to invoke the CLI. The module form is used
+throughout this document:
+
+```powershell
+& $PY -m smartann.cli data status                             # module form
+& C:\Users\HP\.venvs\smartann312\Scripts\smartann.exe data status   # console script
+```
+
+Until 2026-09-05 the module form was a **silent no-op that exited 0** -- no
+`__main__` guard, so it imported the module and ran nothing (ADR-0042). If a CLI
+command ever prints nothing at all, that is the failure mode to suspect;
+`verify_all.py` now fails any step that produces no output.
+
 ---
 
 ## 0. The interpreter
@@ -170,7 +187,7 @@ hardcoded result (Section 3, rule 1).
 | `C:\smartann-results\` | one directory per run: parquet + manifest |
 | `results\` (in repo) | figures, profile table, cost model, verification |
 | `docs\review.md` | the report: status, results, findings, what is blocked |
-| `docs\decisions.md` | 41 ADRs — the reasoning behind every non-obvious choice |
+| `docs\decisions.md` | 42 ADRs — the reasoning behind every non-obvious choice |
 
 Neither `data/` nor `results/` is committed.
 

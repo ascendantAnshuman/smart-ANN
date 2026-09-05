@@ -111,9 +111,36 @@ class DataManifest:
         """Recorded artifacts whose file is gone -- a stale manifest is a lie."""
         return [rel for rel in self._entries if not (self.data_root / rel).exists()]
 
+    def _self_describing_index_roots(self) -> set[str]:
+        """Index roots that carry their own provenance record.
+
+        An index is a build output, not a source artifact: it is reproducible
+        from ``(config.yaml, seed)``, it is rebuilt routinely, and each root
+        already stores a ``meta.json`` naming the config hash it was built
+        from. Hashing its 13,154 constituent files into the data manifest would
+        record the same provenance a second time and churn on every rebuild.
+
+        The exclusion is conditional, not blanket. A root WITHOUT ``meta.json``
+        is a half-written or orphaned build, and its files stay in the
+        unrecorded list -- which is the one case where a stray index file
+        actually means something is wrong.
+        """
+        roots: set[str] = set()
+        index_dir = self.data_root / "index"
+        if not index_dir.is_dir():
+            return roots
+        for dataset_dir in index_dir.iterdir():
+            if not dataset_dir.is_dir():
+                continue
+            for root in dataset_dir.iterdir():
+                if root.is_dir() and (root / "meta.json").is_file():
+                    roots.add(root.relative_to(self.data_root).as_posix())
+        return roots
+
     def unrecorded_files(self, patterns: tuple[str, ...] = ("**/*",)) -> list[str]:
         """Files under the data root with no manifest entry."""
         skip = {self.FILENAME, ".gitkeep", self.FILENAME + ".tmp"}
+        described = self._self_describing_index_roots()
         out: list[str] = []
         for pattern in patterns:
             for p in self.data_root.glob(pattern):
@@ -122,6 +149,8 @@ class DataManifest:
                 rel = p.relative_to(self.data_root).as_posix()
                 # checkpoints and caches are working files, not artifacts
                 if rel.endswith((".part", ".ckpt.npz")) or "/cache/" in f"/{rel}":
+                    continue
+                if any(rel.startswith(f"{root}/") for root in described):
                     continue
                 if rel not in self._entries:
                     out.append(rel)

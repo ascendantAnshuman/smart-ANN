@@ -47,19 +47,28 @@ class Step:
     returncode: int | None = None
     seconds: float = 0.0
     tail: list[str] = field(default_factory=list)
+    n_output_lines: int = 0
 
     @property
     def ok(self) -> bool:
         # A timeout is -1 and is in no step's expected set, so it can never
         # be reported as reproduced.
-        return self.returncode in self.expect_codes
+        if self.returncode not in self.expect_codes:
+            return False
+        # An exit code alone is not evidence. `python -m smartann.cli data
+        # status` exited 0 for thirty-nine commits while doing NOTHING -- the
+        # module had no `__main__` guard, so it imported, defined every
+        # command, ran none, and returned success (ADR-0042). This step scored
+        # that as a pass every time. A process that reproduced something said
+        # so; silence is not a result.
+        return self.n_output_lines > 0
 
 
 STEPS = [
     Step(
         "test suite",
         [PY, "-m", "pytest", "tests/", "-q"],
-        "350 tests. The first thing a reader would run, and the cheapest signal "
+        "359 tests. The first thing a reader would run, and the cheapest signal "
         "that the tree is coherent.",
     ),
     Step(
@@ -130,7 +139,11 @@ def run(step: Step) -> None:
             f"timeout without it firing -- the host almost certainly slept. Treat the "
             f"duration as meaningless."
         )
-    step.tail = [ln for ln in out.strip().splitlines() if ln.strip()][-12:]
+    lines = [ln for ln in out.strip().splitlines() if ln.strip()]
+    step.n_output_lines = len(lines)
+    if not lines:
+        step.tail.append("NO OUTPUT AT ALL -- a silent exit is not a reproduction (ADR-0042).")
+    step.tail = step.tail + lines[-12:]
     for ln in step.tail:
         print(f"    {ln}", flush=True)
     print(
@@ -170,6 +183,7 @@ def main() -> int:
                         "why": s.why,
                         "argv": s.argv[1:],
                         "returncode": s.returncode,
+                        "n_output_lines": s.n_output_lines,
                         "seconds": s.seconds,
                         "ok": s.ok,
                         "tail": s.tail,

@@ -115,3 +115,42 @@ def test_write_leaves_no_temp_file_behind(tmp_path: Path) -> None:
 
     assert not (tmp_path / (DataManifest.FILENAME + ".tmp")).exists()
     assert m.unrecorded_files() == []
+
+
+class TestIndexRootsAreSelfDescribing:
+    """Index roots carry their own provenance, so they are excluded conditionally.
+
+    Discovered when ``data status`` -- run for the first time through a working
+    entry point (ADR-0042) -- reported 13,154 unrecorded files, all of them
+    inside built index directories. Indexes are build outputs reproducible from
+    ``(config.yaml, seed)``, and each root already stores a ``meta.json``. The
+    exclusion is conditional on that file existing, so a half-written root is
+    still reported.
+    """
+
+    def test_described_index_root_is_not_reported(self, tmp_path: Path) -> None:
+        root = tmp_path / "index" / "sift1m" / "abc123"
+        (root / "clusters").mkdir(parents=True)
+        (root / "meta.json").write_text("{}", encoding="utf-8")
+        (root / "centroids.npy").write_bytes(b"x")
+        (root / "clusters" / "00000.npy").write_bytes(b"y")
+
+        assert DataManifest(tmp_path).unrecorded_files() == []
+
+    def test_index_root_without_meta_is_still_reported(self, tmp_path: Path) -> None:
+        """A root with no ``meta.json`` is a half-written build, not an artifact."""
+        root = tmp_path / "index" / "sift1m" / "abc123"
+        root.mkdir(parents=True)
+        (root / "centroids.npy").write_bytes(b"x")
+
+        assert DataManifest(tmp_path).unrecorded_files() == ["index/sift1m/abc123/centroids.npy"]
+
+    def test_stray_file_outside_index_still_reported(self, tmp_path: Path) -> None:
+        """The exclusion must not widen beyond ``index/``."""
+        described = tmp_path / "index" / "sift1m" / "abc123"
+        described.mkdir(parents=True)
+        (described / "meta.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "processed").mkdir()
+        (tmp_path / "processed" / "stray.npy").write_bytes(b"z")
+
+        assert DataManifest(tmp_path).unrecorded_files() == ["processed/stray.npy"]

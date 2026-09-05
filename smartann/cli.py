@@ -618,3 +618,12 @@ def figures_make(
     if runs is not None:
         argv += ["--runs", str(runs)]
     raise typer.Exit(subprocess.run(argv, check=False).returncode)
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via subprocess in tests
+    # Without this, `python -m smartann.cli data status` imports the module,
+    # defines every command, runs none of them, and exits 0. It is the worst
+    # possible failure: silent, and indistinguishable from success. It stood
+    # undetected because `verify_all.py` invoked the data-status step through
+    # exactly this form and scored its vacuous exit 0 as a pass (ADR-0042).
+    app()
