@@ -31,7 +31,7 @@ Query ─► Embed ─► Cheap centroid probe ─► FEATURE VECTOR ─► CONT
                         │                          ▼                         ▼
                         │                   ANN config                 SCR config
                         │              (nprobe, ef_c, ef_L,       (window, overlap,
-                        │               k, rerank_cands)          ctx_ext, top_w, τ)
+                        │               k, per_cluster_k)         ctx_ext, top_w, τ)
                         ▼                          │                         │
                   EcoVector search  ◄───────────────┘                         │
                         │                                                     │
@@ -58,19 +58,50 @@ Query ─► Embed ─► Cheap centroid probe ─► FEATURE VECTOR ─► CONT
 |-------|-------|-------|
 | 0 | Scaffold, contracts, config, manifest | **done** |
 | 1 | Datasets, embeddings, ground truth | **done** |
-| 2 | EcoVector index | not started |
-| 3 | Telemetry and cost model | not started |
-| 3.5 | On-device trace capture (ADR-0008) | not started |
-| 4 | Device simulator | not started |
-| 5 | Selective Content Reduction | not started |
-| 6 | Controller framework and policies | not started |
-| 7 | Full RAG pipeline | not started |
-| 8 | Benchmark harness and experiments | not started |
-| 9 | Android end-to-end validation | not started |
-| 10 | Paper artifacts | not started |
+| 2 | EcoVector index | **done** — 14 PASS / 1 FAIL |
+| 3 | Telemetry and cost model | **done** — latency fitted; energy specified, not fitted |
+| 3.5 | On-device trace capture (ADR-0008) | **blocked** — needs the phone |
+| 4 | Device simulator | blocked on 3.5's trace |
+| 5 | Selective Content Reduction | **done** — cost measured, quality not measurable |
+| 6 | Controller framework and policies | **done** — static, AIMD, budget + profile table |
+| 7 | Full RAG pipeline | **blocked** — no `llama-cpp-python` wheel; needs MSVC |
+| 8 | Benchmark harness and experiments | **done** — matrix, figures, verification |
+| 9 | Android end-to-end validation | blocked, same gate as 3.5 |
+| 10 | Paper artifacts | in progress — `docs/review.md` |
 
-Unimplemented entry points raise `NotImplementedError` and are listed in
-[TODO.md](TODO.md). Nothing in this repository returns a plausible dummy value.
+Every entry point is implemented; there are no `NotImplementedError` sites left,
+and a test asserts that. Nothing in this repository returns a plausible dummy
+value.
+
+### Contributions — what can actually be claimed
+
+The phase table says what was built. This says what the measurements support,
+and it is consistently lower.
+
+| | Contribution | State |
+|---|---|---|
+| C1 | Runtime-adaptive ANN effort | **demonstrated** in three independent experiments |
+| C2 | Adaptive SCR aggressiveness | mechanism + cost only; quality needs a generator |
+| C3 | Joint vs split control | both dimensions run, cost-only |
+| C4 | Budget-constrained retrieval | **half** — latency budgets honoured at 0.2% violation; energy unmeasurable here |
+| C5 | Battery / device-state policy | not started — needs the phone |
+
+### Findings that changed the design
+
+- **MobileRAG's per-cluster HNSW graphs do not pay** at the cluster sizes the
+  design produces — identical recall to brute force, ~2x the wall-clock, and
+  they still lose *inside* the regime the paper's own condition
+  `ef_L·M' < N/Nc` says they should win. The paper's access model has no term
+  for turning bytes into a searchable structure, which we measured at 95-99% of
+  load time (ADR-0028, ADR-0031).
+- **The first control law was structurally wrong**, not badly tuned: it acted
+  once per query on a 50-sample windowed p95, so it acted on up to fifty
+  superseded decisions. Pacing actions to the feedback delay fixed it, confirmed
+  by a pre-declared prediction (ADR-0032).
+- **The latency cost model cannot extrapolate** past its fitted regime, because
+  `cpu_util` saturates: 12,469 samples pinned at 1.000 across a 41x latency
+  spread. That is why the budget policy reads measured tables rather than
+  predicting (ADR-0033).
 
 ## What is real and what is simulated
 
@@ -114,8 +145,11 @@ truth comes from Phase 9 only, which is therefore **required, not optional**
 (ADR-0007): it is the sole source of measured temperature and battery-current
 energy, and the only thing that can calibrate the simulator's thermal constants.
 
-Building the index additionally requires the MSVC C++ Build Tools, since
-`hnswlib` ships no Windows wheels -- see TODO.md for the one-line install.
+`hnswlib` ships no Windows wheels for any Python version. This is resolved
+without a compiler by `chroma-hnswlib`, a redistribution of the same library,
+pinned on CPython 3.12 and verified by 21 contract tests (ADR-0017). The MSVC
+Build Tools are still required for Phase 7's `llama-cpp-python`, which has no
+wheel and no equivalent fallback.
 
 ## Datasets
 
@@ -155,6 +189,10 @@ overlap over the union of unique train and dev contexts (ADR-0009).
 
 ## Quickstart
 
+Every command, from a fresh checkout to figures, is in
+[docs/RUNBOOK.md](docs/RUNBOOK.md). The essentials:
+
+
 ```bash
 # Windows, from the repo root. The venv lives outside OneDrive on purpose.
 python -m venv C:/Users/<you>/.venvs/smartann
@@ -162,7 +200,7 @@ C:/Users/<you>/.venvs/smartann/Scripts/python -m pip install -U pip uv
 C:/Users/<you>/.venvs/smartann/Scripts/uv pip install -e ".[dev]"
 
 smartann --help
-smartann paths          # where bulk data will be written
+smartann paths          # where bulk data is written
 pytest
 ruff check .
 mypy smartann

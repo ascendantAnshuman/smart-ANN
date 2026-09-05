@@ -1754,3 +1754,58 @@ machinery and no measurement: `BudgetPolicy.honours_energy_budget()` returns
 **False** and every run manifest records it, because acting on a modelled energy
 as if measured is the precise failure the capability gate exists to prevent.
 Phase 3.5 supplies the measurement that would complete it.
+
+---
+
+## ADR-0037 — A tolerance flag that ignores the verdict is a check that cannot fail
+
+**Status.** Accepted. The third instance of one root pattern, and the one worth
+naming as a pattern rather than an incident.
+
+**What happened.** `scripts/verify_all.py` runs the documented entry points end
+to end. Its acceptance step has one *expected* failure -- NYTimes check 4 is a
+dataset property, not a defect -- so demanding exit 0 could only be satisfied by
+hiding a real result. The escape hatch was `expect_zero=False`.
+
+`expect_zero=False` does not mean "tolerate exit 1". It means **tolerate
+anything**. The step timed out when the host slept mid-run, returned the `-1`
+sentinel, and the harness reported:
+
+```
+  OK    phase 2 acceptance     exit  -1  26010.6s      <- 7.2 h against a 1800 s timeout
+7/7 steps reproduced.
+```
+
+Six steps had reproduced. One had never finished. The summary said seven.
+
+**Fixed by replacing the boolean with the verdict itself:** `expect_codes=(0, 1)`
+for that step, `(0,)` elsewhere. A timeout is `-1`, in no step's expected set,
+and can never be reported as reproduced. Unit-checked in both directions before
+re-running.
+
+```
+  OK    phase 2 acceptance     exit   1    762.8s
+7/7 steps reproduced.
+```
+
+762.8 s against 26,010 s also settles what the earlier duration was: the host
+sleeping, not a measurement. A warning now fires whenever wall-clock exceeds the
+timeout without the timeout firing, because the exit code can be fine and the
+duration still meaningless.
+
+**The pattern, stated once so it is recognisable next time.** Three defects in
+this project share one root: *a check whose outcome does not depend on what it
+is checking.*
+
+1. Check 4 compared an index with itself and reported PASS.
+2. `headline_sentence()` carried a hardcoded conclusion beside computed numbers,
+   and printed "the control law does not work" next to a negative recall cost.
+3. This: a tolerance flag that accepted every outcome.
+
+Each produced a **green line in a summary** — the line nobody re-reads. None was
+caught by a test, because in every case the code did exactly what it was written
+to do. All three were caught by reading a number that looked wrong.
+
+**The design rule.** An escape hatch should say *what is expected*, never *ignore
+the result*. `expect_codes=(0, 1)` and `expect_zero=False` differ only when
+something unexpected happens, which is precisely the case the check exists for.
