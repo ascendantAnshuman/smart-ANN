@@ -2259,3 +2259,69 @@ needs its contamination recorded, or the numbers outlive the caveat.
 still valid — they are recall and memory properties, not timings. Only the
 durations are meaningless. The failure message says so, because "re-run
 everything" is the wrong instruction when only one column is affected.
+
+---
+
+## ADR-0049 — C4 and C5 built, and a capability table that lied about itself
+
+**Status.** Accepted. 2026-09-05.
+
+**What was built.** Three pieces that existed as claims and now exist as code:
+
+- `smartann/telemetry/android.py` — the first monitor in this project that can
+  report `temperature_c` as *available*, reading thermal zones, per-cluster
+  frequencies and battery state from the handset over adb.
+- `smartann/controller/policies/device.py` — **C5**, a policy that derates
+  retrieval effort on temperature, thermal slope, battery level and throttling.
+- `smartann/controller/policies/energy.py` — **C4's second half**, the first
+  policy in the project whose `honours_energy_budget()` can return True.
+
+**The defect this work produced, and it is the interesting part.** The first
+`AndroidMonitor.capabilities()` hardcoded `temperature_c` and `freq_ratio` to
+`True`, on the reasoning that ADR-0046 had *proven* the handset reports them.
+Run against a disconnected phone it declared them available while `sample()`
+returned NaN.
+
+That is a capability table asserting a claim its own monitor cannot satisfy —
+the exact failure `assert_manifest_consistent` was written to catch, appearing
+inside the class that is supposed to be the source of truth for it. It was
+caught by running the monitor against the real device and reading the output
+next to the table, not by any test.
+
+The fix: **every `available` is earned by a live read**. `temperature_c` is
+available when a zone actually returns a finite number; `freq_ratio` when
+cpufreq actually parses. A capability is a statement about *this monitor
+reaching this device now*, not about what the hardware can do in principle.
+
+**Three design decisions worth defending.**
+
+*`honours_energy_budget()` is per-instance, not per-class.* It returns True only
+when an energy source is wired in **and** the capability is declared. A source
+without the flag is a caller who wired a mock; a flag without a source is a
+caller declaring a platform capability this policy cannot reach. On the
+development laptop it constructs without either and reports False, exactly as
+`BudgetPolicy` always has.
+
+*`DeviceStatePolicy.honours_energy_budget()` stays False.* It reads battery
+percentage and charging state. Neither is an energy budget. Returning True
+because a *related* number became readable is the precise slip the capability
+gate exists to prevent, and the two policies are separate classes so that the
+distinction is structural rather than remembered.
+
+*Device state can only ever LOWER effort.* A policy able to raise effort on a
+hot device could violate the latency SLO in the name of thermal management,
+which is not a trade anyone asked for. The latency budget sets the ceiling and
+device state derates from it.
+
+**What is deliberately not here.** No thermal model. Phase 4 must fit one from a
+measured trace, and choosing constants now would break "fitted, never chosen" in
+a new place. `DeviceTiers` encodes only the ordering that survives without a
+model — hotter and emptier means less effort, monotonically — and its
+thresholds are anchored on the one thermal measurement that exists: skin at
+36.6 C idle, 41.4 C after 60 s of load (ADR-0047). 42 C is therefore "sustained
+load" rather than a round number, and 46 C is deliberately above anything
+observed, because a shield should trip on states the calibration did not visit.
+
+**What this does not make true.** C4 and C5 are *built*, not *demonstrated*.
+Neither has run against the handset in an experiment, and until one does the
+scoreboard says built-not-demonstrated. 440 tests.
