@@ -141,6 +141,20 @@ def main() -> int:
     ap.add_argument("--out", default="/sdcard/smartann/trace")
     ap.add_argument("--nprobe", type=int, nargs="*", default=[1, 4, 8, 16, 32])
     ap.add_argument(
+        "--work-s",
+        type=float,
+        default=60.0,
+        help="seconds of querying per duty cycle",
+    )
+    ap.add_argument(
+        "--idle-s",
+        type=float,
+        default=30.0,
+        help="seconds of IDLE per duty cycle. Without idle periods the energy "
+        "baseline is extrapolated rather than measured, and the fitted idle "
+        "power comes out negative (ADR-0052). 0 disables duty cycling.",
+    )
+    ap.add_argument(
         "--require-discharging",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -207,7 +221,31 @@ def main() -> int:
     t_end = time.time() + args.minutes * 60.0
     qi = 0
     t0_wall = time.time()
+    # Duty cycle: alternate WORK and IDLE.
+    #
+    # Without idle periods the energy decomposition is not identifiable. The
+    # first on-battery trace ran queries continuously, so `work_rate` spanned
+    # 95-251 clusters/s and never approached zero; regressing power on it put
+    # the intercept 95 units outside the data and returned **-0.209 W idle**, a
+    # phone consuming negative power (ADR-0052). No choice of estimator fixes
+    # that, because the baseline the screen and radios draw was never observed.
+    #
+    # Idle periods make it an interpolation instead of an extrapolation: the
+    # regression sees work_rate near zero and reads the intercept off measured
+    # samples rather than inventing it.
+    phase_log: list[dict] = []
+    cycle_s = args.work_s + args.idle_s
     while time.time() < t_end:
+        elapsed = time.time() - t0_wall
+        if args.idle_s > 0 and (elapsed % cycle_s) >= args.work_s:
+            # IDLE: run nothing, let the sampler observe the baseline.
+            if not phase_log or phase_log[-1]["phase"] != "idle":
+                phase_log.append({"phase": "idle", "t_wall": elapsed})
+            time.sleep(0.25)
+            continue
+        if not phase_log or phase_log[-1]["phase"] != "work":
+            phase_log.append({"phase": "work", "t_wall": elapsed})
+
         nprobe = args.nprobe[qi % len(args.nprobe)]
         row_i = qi % queries.shape[0]
         cfg = cfgs[nprobe]
@@ -249,6 +287,8 @@ def main() -> int:
                 "n_samples": len(sampler.rows),
                 "nprobe_levels": args.nprobe,
                 "sample_period_s": args.sample_period,
+                "duty_cycle": {"work_s": args.work_s, "idle_s": args.idle_s},
+                "phase_transitions": phase_log,
                 "k": args.k,
                 # If ANY sample says CHARGING the energy trace is not usable
                 # for a discharge integration, and that must be visible in the

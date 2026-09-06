@@ -124,12 +124,30 @@ def main() -> int:
                 }
             )
 
-    # Fitted anyway, and recorded as NOT REPORTABLE, so the number exists for
-    # anyone who wants to check the reasoning rather than take it on trust.
-    design = np.column_stack([w, np.ones(w.size)])
-    coef, *_ = np.linalg.lstsq(design, p, rcond=None)
-    r2 = float(1.0 - np.sum((p - design @ coef) ** 2) / np.sum((p - p.mean()) ** 2))
-    intercept_physical = bool(coef[1] >= 0)
+    # The intercept is only meaningful if the data reaches toward zero work.
+    # With duty cycling the trace contains genuine idle intervals, so the
+    # baseline is INTERPOLATED from measured samples; without them it is
+    # extrapolated, and extrapolation is what produced -0.209 W (ADR-0052).
+    #
+    # `w` above excludes zero-work intervals so the quintiles describe working
+    # periods. The regression needs them back, precisely because they are the
+    # anchor.
+    w_all, p_all = wr[1:], watts[1:]
+    n_idle = int((w_all == 0).sum())
+    idle_fraction = float(n_idle / w_all.size) if w_all.size else 0.0
+    # 5% of intervals at zero work is the line. Below that the intercept is
+    # still leaning on a handful of points and the old failure mode is a
+    # rounding error away.
+    has_baseline = idle_fraction >= 0.05
+
+    design = np.column_stack([w_all, np.ones(w_all.size)])
+    coef, *_ = np.linalg.lstsq(design, p_all, rcond=None)
+    r2 = float(1.0 - np.sum((p_all - design @ coef) ** 2) / np.sum((p_all - p_all.mean()) ** 2))
+    # BOTH conditions. A positive intercept fitted without idle data is a lucky
+    # extrapolation, not a measurement, and would be reported with the same
+    # confidence as a real one.
+    intercept_physical = bool(coef[1] >= 0 and has_baseline)
+    measured_idle_w = float(np.median(p_all[w_all == 0])) if n_idle else float("nan")
 
     result = {
         "trace": {
@@ -159,8 +177,20 @@ def main() -> int:
             "slope_w_per_cluster_per_s": float(coef[0]),
             "intercept_w": float(coef[1]),
             "r2": r2,
+            "idle_intervals": n_idle,
+            "idle_fraction": idle_fraction,
+            "measured_idle_power_w": measured_idle_w,
+            "mj_per_cluster": float(coef[0] * 1000.0) if intercept_physical else None,
             "why_not_reportable": (
-                "The fitted intercept is negative, which would be a phone idling "
+                (
+                    f"Only {idle_fraction * 100:.1f}% of intervals had zero work "
+                    f"(need 5%+), so the intercept is extrapolated rather than "
+                    f"measured. Re-run device_trace.py with --idle-s to duty-cycle "
+                    f"the workload. "
+                    if not has_baseline
+                    else ""
+                )
+                + "The fitted intercept is negative, which would be a phone idling "
                 "at negative power. work_rate spans "
                 f"{w.min():.0f}-{w.max():.0f} clusters/s and never approaches "
                 "zero, so the intercept extrapolates far outside the data. At the "

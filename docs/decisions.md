@@ -2579,3 +2579,54 @@ on the target device, responds monotonically to retrieval effort, and
 source. What is not demonstrated is a controller holding a per-query energy
 budget in a live run, because per-query attribution needs the idle baseline
 this trace lacks.
+
+---
+
+## ADR-0053 — Duty-cycle the trace so the energy baseline is measured, not extrapolated
+
+**Status.** Accepted. 2026-09-06. Follows ADR-0052.
+
+**The problem, restated in one line.** `power ~ a·work_rate + b` returned
+**b = −0.209 W** because the trace never stopped working: `work_rate` spanned
+95–251 clusters/s, so the intercept sat 95 units outside the data. No estimator
+recovers a baseline that was never observed.
+
+**The fix is in the experiment, not the analysis.** `device_trace.py` now
+alternates WORK and IDLE — `--work-s 60 --idle-s 30` by default. During idle it
+runs no queries and lets the sampler watch the screen and radios alone. That
+turns the intercept from an extrapolation into an interpolation: the regression
+reads the baseline off measured samples sitting at work_rate = 0.
+
+Phase transitions are recorded in the trace metadata, so a reader can see when
+the workload stopped rather than inferring it from a gap in the query log.
+
+**The fit now requires the baseline rather than hoping for it.** Two conditions
+must both hold before per-query attribution is reported:
+
+1. the fitted intercept is non-negative, and
+2. **at least 5% of intervals are at zero work.**
+
+The second is the one that matters. A positive intercept fitted *without* idle
+data is a lucky extrapolation, and it would be reported with exactly the same
+confidence as a measured one — which is the failure ADR-0052 caught, wearing a
+friendlier face. Below 5% the intercept is still resting on a handful of points
+and the old failure mode is a rounding error away.
+
+**Tested end-to-end against synthetic traces with known answers.** Seven tests
+in `tests/test_energy_fit.py` plant a known idle power (0.80 W) and slope
+(0.004 W per cluster/s) and check the fit recovers both, refuses a trace with
+no idle time, refuses a charging trace, and refuses a positive current.
+
+**A fixture bug worth recording, because it looked exactly like an estimator
+bug.** The first synthetic generator emitted each row's queries *after* that
+row's timestamp, while the fit attributes work in `(t[i-1], t[i]]` to the power
+at `t[i]`. Power and work ended up one interval apart, and a perfectly linear
+dataset fitted at **a third of its true slope**. Read without checking, that
+says the estimator is broken; it was the test data. The alignment requirement is
+now stated in the generator's docstring, because the next person to write a
+synthetic trace will reach for the same wrong shape.
+
+**Status of C4.** Unchanged until the trace is re-run: energy is measured and
+effort demonstrably drives power, but per-query attribution stays
+`reportable: false`. The machinery to produce it correctly now exists and is
+tested; what remains is 20 minutes of handset time.
