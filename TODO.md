@@ -14,18 +14,40 @@ entry here will fail the suite rather than sit unnoticed.
 
 ## What remains, and what each needs
 
-| Phase | Needs |
-|---|---|
-| 3.5 device trace | NOT RUN. Everything is staged: index on the handset at recall parity with the host, thermal sampling working, energy sign calibrated. `scripts/device_trace.py` runs it. |
-| 4 simulator | Phase 3.5's trace. Thermal constants must be FITTED from a real trace, never chosen. |
-| 9 device validation | Phase 3.5's trace first. |
+Nothing is blocked. Each item below is a known quantity of work.
 
-**Phase 7 is done and was never actually blocked** (ADR-0043). The blocker was
-recorded against `llama-cpp-python`, which does need MSVC, rather than against
-the capability. `transformers` and `torch` have been installed since Phase 1 as
-transitive dependencies of `sentence-transformers`, so a CPU generator was
-available the whole time. `scripts/phase7_qa.py` runs SQuAD end-to-end on
-`google/flan-t5-base` and scores EM/F1.
+| Item | What it needs |
+|---|---|
+| **C4** per-query energy | ONE 21-minute device trace with idle periods. Instrumentation built and tested (ADR-0053). |
+| **C5** demonstration | An experiment running `DeviceStatePolicy` against live handset telemetry. |
+| **Phase 9** validation | C4 and C5 first. |
+| **`freq_ratio`** | A decision, not code. See `docs/review.md` section 7. |
+
+### How to run the C4 trace, start to finish
+
+The handset fights this in two ways, so the order matters.
+
+1. **Play Store -> profile -> Play Protect -> settings -> scan OFF.** Google
+   re-enables this on its own, and it blocks the install every time.
+2. `adb install --no-streaming -r -g termux-api.apk` — the ROM has deleted
+   Termux:API twice, so check `pm list packages | grep termux` shows BOTH
+   `com.termux` and `com.termux.api` before going further.
+3. Verify the sensor responds in under a second. A 15-second timeout means the
+   API is down and the trace will silently produce no energy.
+4. **Unplug the cable.**
+5. On the phone, in Termux: `cd /sdcard` then `bash go.sh`
+6. Confirm it prints `power state OK: DISCHARGING`. If it says REFUSING TO
+   START, the cable is still in.
+7. **Leave the phone alone for 21 minutes.** Do not plug in to check progress --
+   that was tried, and it charged the phone mid-trace and spoiled the run.
+   The phone prints `TRACE FINISHED` when it is done.
+8. Plug in, then on the host:
+   `adb pull /sdcard/smartann/trace_c4/... results/device/` and
+   `python scripts/fit_energy_model.py --prefix c4_`
+
+The fit reports `reportable: true` only when 5%+ of intervals sat at zero work.
+If it still refuses, the duty cycle did not run and the trace should be redone
+rather than argued with.
 
 ## Known blockers (not stubs)
 

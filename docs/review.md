@@ -579,7 +579,126 @@ along the front, not a free win.
 **This verdict is the second one this experiment produced.** The first run also
 said "C3 supported", and it was an artifact — see the defect table, #20.
 
-## 6d. Contribution scoreboard
+## 6g. Phases 3.5 and 4 — the device
+
+Everything above was measured on a laptop standing in for a phone. This section
+is the phone.
+
+**vivo I2304, Android 16, arm64-v8a, 8 cores in three clock domains.** Getting
+the project onto it produced two findings before a single measurement was taken
+(ADR-0046, ADR-0050): hnswlib builds and then **crashes on import** unless
+`HNSWLIB_NO_NATIVE=1` is set, and HNSW index binaries **do not transfer**
+between chroma-hnswlib and upstream hnswlib — proven with byte-identical files
+that one library refuses to read. The centroid graph is therefore rebuilt
+on-device in 0.016 s, and equivalence was checked rather than assumed: **host
+and device both score recall@10 = 0.9543** on the same 300 queries.
+
+### The thermal model — fitted, never chosen
+
+19,144 queries over 25.0 minutes, `nprobe` swept 1→32, 478 thermal samples.
+Skin temperature rose **32.90 → 37.51 °C**.
+
+```
+dT/dt = a·work_rate + b·(T − T_ref) + c
+```
+
+| window | n | R² | a | τ |
+|---|---|---|---|---|
+| 3 s | 446 | 0.109 | 6.08e-04 | 107 s |
+| 15 s | 89 | 0.229 | 9.43e-04 | 67 s |
+| 30 s | 44 | 0.304 | 9.14e-04 | 68 s |
+| 60 s | 22 | 0.187 | 5.93e-04 | 97 s |
+| 120 s | 11 | 0.691 | 8.69e-04 | 76 s |
+
+**The whole sweep is reported because the differencing window moves R² sixfold**,
+and reporting one row would hide that the answer depends on a choice no reader
+would think to question. The 120 s row scores highest and is **excluded** —
+eleven points against three free parameters is a number that flatters itself.
+
+What is convincing is not the R² but the **stability**: τ stays 67–107 s and `a`
+stays 5.9–9.4e-04 across every window. Point estimates that barely move across
+analysis choices are better evidence than any single goodness-of-fit.
+
+**τ ≈ 68 s is the result that matters.** Phase 6's control law collapsed because
+its control period was shorter than its observation delay. This is the *measured*
+delay for the thermal loop — so a thermally-aware controller sampling faster
+than ~68 s would reproduce that collapse, and now there is a number saying so
+rather than an argument.
+
+**Latency on the device**, measured for the first time:
+
+| nprobe | p50 | p95 |
+|---|---|---|
+| 1 | 5.59 ms | 13.82 ms |
+| 4 | 20.50 ms | 52.26 ms |
+| 8 | 40.46 ms | 101.46 ms |
+| 16 | 82.61 ms | 189.82 ms |
+| 32 | 169.21 ms | 354.10 ms |
+
+Clean linear scaling, and roughly **13× slower than the laptop** — which is the
+gap that makes adaptive effort worth having on a phone at all.
+
+### Energy — measured, and one number refused
+
+15,425 queries over 20.0 minutes, **unplugged**, 209 samples, **zero read
+failures**. Every sample `DISCHARGING`; every current negative.
+
+| | |
+|---|---|
+| total energy | **1531.4 J** |
+| mean power | **1.277 W** |
+| p5 / p95 | 0.736 / 2.218 W |
+| all-in per query | **99.28 mJ** |
+
+**Effort drives power, and this needs no model:**
+
+| work (clusters/s) | median power |
+|---|---|
+| 95–126 | 0.864 W |
+| 126–141 | 0.925 W |
+| 141–153 | 0.989 W |
+| 153–189 | 1.330 W |
+| 189–251 | 1.940 W |
+
+A 2.6× increase in retrieval work costs a 2.2× increase in power, correlation
++0.645. **That is C4's premise demonstrated on real
+hardware:** retrieval effort has a measurable energy price, so an energy budget
+is something a controller can genuinely trade against.
+
+**What is refused.** The obvious next step — marginal energy per cluster — fits
+at R² 0.415 and returns an idle power of
+**-0.209 W**. A phone idling at negative power does not
+exist. Work rate spans 95–251 clusters/s and never approaches zero, so the
+intercept extrapolates 95 units past the nearest observation; independently, at
+the trace's mean effort the marginal term predicts 115 mJ/query against a
+measured all-in average of 99.3 mJ/query.
+
+A number implying negative idle power is not a slightly-wrong version of the
+right answer. It is computed, recorded as `reportable: false`, and printed with
+its reasoning (ADR-0052).
+
+**The fix is an experiment change, not an analysis change** (ADR-0053). The
+trace now alternates 60 s of work with 30 s of idle, so the baseline is
+measured rather than extrapolated, and the fit refuses to report attribution
+unless at least 5% of intervals sit at zero work. Seven tests plant a known
+baseline and slope and verify both are recovered. **What remains is 20 minutes
+of handset time.**
+
+### Two guards, from two silent failures
+
+An earlier 20-minute run completed with **all 209 samples CHARGING** — median
+current **0 mA**, a 103/102 split between negative and positive, the charger
+modulating exactly as ADR-0047 predicted. Integrating over a sign that is a coin
+flip yields approximately zero, so that run was not a weak measurement but no
+measurement.
+
+Asking more carefully was not the fix. `device_trace.py` now refuses to start
+unless it reads `DISCHARGING`, and `fit_energy_model.py` refuses any trace
+containing a charging sample or a positive current. Same lesson as
+`MachineWatch` (ADR-0048): **a precondition asserted once and never verified is
+not a precondition.**
+
+## 6h. Contribution scoreboard
 
 The phase table says what was built. This says what can be *claimed*, which is
 the number that matters and is consistently lower.
@@ -589,39 +708,30 @@ the number that matters and is consistently lower.
 | **C1** | Runtime-adaptive ANN effort | **Demonstrated** — three independent experiments | Narrowed by measurement: `ef_centroid` is free and `ef_list` inert, so it is one-dimensional. Stated as *adaptive retrieval effort*, not "several ANN parameters". |
 | **C2** | Adaptive SCR aggressiveness | **Demonstrated** — quality measured, n=1000 | Reduction costs quality at every level (all CIs exclude zero), and the trade-off is smooth enough to control. Whether SCR *pays* depends on precomputing window embeddings; on-path it costs 4× what it saves. |
 | **C3** | Joint vs split control | **Supported on the surface** — 3 joint cells on the Pareto front | Joint control extends the frontier *downward in cost*; it does not beat single-dimension control at peak quality. A controller that exploits this is not yet built. |
-| **C4** | Budget-constrained retrieval | **Half** — latency budgets honoured at 0.2% violation | Energy budgets: the measurement now EXISTS (ADR-0046) but no energy-constrained policy has been run against it. `honours_energy_budget()` still returns False. |
-| **C5** | Battery / device-state policy | **Unblocked, not built** | Device state is now readable — battery current, 110 thermal zones, per-cluster frequency. Nothing consumes it yet. |
+| **C4** | Budget-constrained retrieval | **Half, and the half is the important one** | Latency budgets honoured at 0.2% violation. Energy is now MEASURED on the device and effort demonstrably drives power (0.86 → 1.94 W). `EnergyBudgetPolicy.honours_energy_budget()` returns True against a real source. Missing: per-query attribution, which needs one 20-minute trace with idle periods (ADR-0053). |
+| **C5** | Battery / device-state policy | **Built, not demonstrated** | `DeviceStatePolicy` derates on temperature, thermal slope, battery and throttling; 25 tests pass against synthetic state. It has never run against the handset in an experiment, and until it does the claim is about code rather than behaviour. |
 
-**Two of five are demonstrated, one is supported, one is half, one is
-unblocked-but-unbuilt.** That is up from one-and-a-half at the last review, and
-the movement came from two places: a blocker that turned out not to exist
-(ADR-0043) and a USB cable (ADR-0046).
+**Two demonstrated, one supported, two partial.** Up from one-and-a-half at
+the last review, and the movement came from two places that were never really
+blockers: a dependency that had been installed since Phase 1 (ADR-0043), and a
+USB cable (ADR-0046).
 
-## 7. What is not built, and what gates it
+The two partials are partial for different reasons, and the difference matters.
+C4 has the measurement and lacks one 20-minute run. C5 has the code and lacks an
+experiment. Neither is blocked by anything unknown.
 
-**The hardware gate is gone.** All seven pre-declared device questions are
-answered and both critical ones passed (ADR-0046). Phase 3.5 is **GO**.
+## 7. What remains
 
-| Not built | Gate |
-|---|---|
-| Thermal model, energy model, DVFS tiers | Phase 3.5's trace, which is now runnable. Constants must be **fitted** from it, never chosen. |
-| Bandit policy, Pareto policy, safety shield | Phase 6, which needs the Phase 3 cost model. |
-| Energy-constrained policy (C4's second half) | The measurement now exists; no policy consumes it. `honours_energy_budget()` still returns False and must until one does. |
-| Battery/device-state policy (C5) | Device state is readable. Nothing consumes it yet. |
+Nothing is blocked. Everything below is a known quantity of work.
 
-**Two conditions carry into every device measurement.**
+| | What | Cost |
+|---|---|---|
+| **C4** | Per-query energy attribution | One 20-minute device trace with idle periods. Instrumentation built and tested (ADR-0053). |
+| **C5** | Demonstration | An experiment running `DeviceStatePolicy` against live handset telemetry. |
+| **Phase 9** | On-device validation | Needs C4 and C5 first. |
+| **Phase 6** | Bandit / Pareto policies, safety shield | Optional; the profile table and three policies already cover the claim. |
 
-**`HNSWLIB_NO_NATIVE=1` is mandatory.** Without it the on-device build succeeds
-and the library SIGILLs on import. This belongs in the setup script, not in
-anyone's memory.
-
-**Measure unplugged.** Battery current is available without root and its
-magnitude responds to load, but its **sign is unstable while charging** —
-−106000, +110000, +46000, +97000 µA at 30-second intervals under continuous
-load. Every reading so far was on AC. The convention must be re-established from
-a discharging device before a single joule is reported.
-
-### One decision is waiting on you
+### The one decision that is not mine
 
 **`DeviceState.freq_ratio` is a single scalar, and the target SoC has three
 clock domains.** Eight cores at 2.016 / 2.803 / 3.187 GHz; one instantaneous
@@ -629,27 +739,38 @@ sample held ratios 1.00, 0.61, 0.22 and 0.27 simultaneously. Which ratio a query
 experiences depends on where Android's scheduler placed the thread — something
 this project neither controls nor observes from inside the process.
 
-Nothing has been changed, because `types.py` needs your go-ahead and the options
-differ in what the controller would be permitted to claim:
+`types.py` is unchanged, because the options differ in what the controller would
+be permitted to claim:
 
-- a **per-cluster vector**, which is honest but changes every consumer of `DeviceState`
-- the **ratio of the core the thread actually ran on**, which is the physically
-  meaningful one but requires reading the scheduler's placement per query
-- a **documented worst case**, which is cheap and weakens every claim built on it
+- a **per-cluster vector** — honest and complete, but changes every consumer of `DeviceState`
+- the **ratio of the core the thread actually ran on** — physically meaningful, needs a per-query scheduler read
+- a **documented worst case** — cheap, and weakens every claim built on it
 
-The energy and thermal dependency was **identified and recorded in Phase 1**
-(ADR-0007, ADR-0008), before any work was built on top of it — not discovered
-late. The capability table in every run manifest makes the absence
-machine-checkable rather than a matter of memory.
+`AndroidMonitor` currently reports `max(ratio)` across cores with a comment
+saying it answers *"is any cluster at speed"*, which is what a throttling
+detector asks. That is a placeholder, not an answer.
 
-**One decision must be made before Phase 3 is extended.** Caching reconstructed
-cluster data would remove most of the remaining load cost, but it changes the
-dominant cost term from `n_cluster_loads` to `n_cache_misses` — different
-distributions, so a cost model fitted on one is *invalid* for the other, and the
-failure would surface as unexplained controller underperformance. Current
-decision: no cache; memory-map instead. **The same trap now applies to SCR**,
-where precomputing window embeddings would move its cost from ~1220 ms on-path
-to ~8 ms — a change worth making and worth re-fitting for, not slipping in.
+### Two rules that carry into all device work
+
+**`HNSWLIB_NO_NATIVE=1` is mandatory.** Without it the on-device build succeeds
+— exit 0, wheel produced — and the library dies with SIGILL on import. Both
+builds report success; only running the code distinguishes them (ADR-0046).
+
+**Measure unplugged.** The current's sign is unstable on AC. `device_trace.py`
+refuses to start otherwise, and the fit refuses to integrate such a trace
+(ADR-0047, ADR-0052).
+
+### A standing design trap, now applying in two places
+
+Caching reconstructed cluster data would remove most of the remaining load cost,
+but it moves the dominant cost term from `n_cluster_loads` to `n_cache_misses` —
+different distributions, so a model fitted on one is *invalid* for the other,
+and the failure would surface as unexplained controller underperformance.
+Current decision: no cache; memory-map instead.
+
+**The same trap now applies to SCR.** Precomputing window embeddings at index
+time would move its cost from ~1220 ms on the query path to ~8 ms — a change
+worth making, and worth re-fitting for rather than slipping in.
 
 ## 8. Reproducing this
 
@@ -659,8 +780,22 @@ smartann index build configs/index/sift1m_ecovector.yaml
 python scripts/phase2_acceptance.py --datasets sift1m nytimes
 python scripts/experiment_contention.py
 python scripts/phase7_qa.py --n-questions 1000
+python scripts/phase8_joint.py --n-questions 250
 python scripts/make_figures.py
 python scripts/verify_all.py                # all seven, end to end
+```
+
+On the handset, in Termux, **unplugged** (it refuses to start otherwise):
+
+```
+PYTHONPATH=/sdcard/smartann python /sdcard/smartann/device_trace.py   --minutes 21 --work-s 60 --idle-s 30 --out /sdcard/smartann/trace_c4
+```
+
+then back on the host:
+
+```
+python scripts/fit_thermal_model.py
+python scripts/fit_energy_model.py
 ```
 
 `python -m smartann.cli ...` is equivalent to the `smartann` console script.
