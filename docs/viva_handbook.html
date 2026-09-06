@@ -1,0 +1,522 @@
+<title>SMART-ANN Viva Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+:root{
+  --paper:#f7f7f5; --panel:#fdfdfc; --ink:#14181f; --muted:#5a6068;
+  --rule:#dcdcd6; --rule-soft:#e9e9e4;
+  --accent:#1e3a5f; --accent-soft:#e7ecf3;
+  --signal:#a8322d; --signal-soft:#f6e9e8;
+  --good:#25603f; --good-soft:#e6efe9;
+  --sans:"Source Sans 3",system-ui,-apple-system,Segoe UI,sans-serif;
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#101317; --panel:#171b21; --ink:#e7e8e6; --muted:#9aa1ab;
+    --rule:#2b313a; --rule-soft:#222831;
+    --accent:#8fb6de; --accent-soft:#1a2530;
+    --signal:#e08a83; --signal-soft:#2b1e1e;
+    --good:#7fc39a; --good-soft:#182420;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101317; --panel:#171b21; --ink:#e7e8e6; --muted:#9aa1ab;
+  --rule:#2b313a; --rule-soft:#222831;
+  --accent:#8fb6de; --accent-soft:#1a2530;
+  --signal:#e08a83; --signal-soft:#2b1e1e;
+  --good:#7fc39a; --good-soft:#182420;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--serif);
+  font-size:17px;line-height:1.62;margin:0}
+.wrap{display:grid;grid-template-columns:1fr;gap:0;max-width:1180px;margin:0 auto;padding:0 22px 90px}
+@media(min-width:1000px){.wrap{grid-template-columns:232px minmax(0,1fr);gap:52px;padding:0 32px 90px}}
+nav.toc{display:none}
+@media(min-width:1000px){
+  nav.toc{display:block;position:sticky;top:0;align-self:start;max-height:100vh;
+    overflow-y:auto;padding:34px 0 40px;font-family:var(--sans);font-size:13px;line-height:1.45}
+  nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:3px 0}
+  nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent)}
+  nav.toc .g{margin-top:14px;font-weight:700;color:var(--ink);
+    text-transform:uppercase;letter-spacing:.08em;font-size:10.5px}
+}
+main{min-width:0;padding-top:34px}
+h1{font-family:var(--sans);font-size:clamp(30px,4.6vw,46px);line-height:1.06;
+  font-weight:700;letter-spacing:-.022em;margin:0 0 10px;text-wrap:balance}
+h2{font-family:var(--sans);font-size:25px;font-weight:700;letter-spacing:-.012em;
+  margin:56px 0 6px;padding-top:20px;border-top:2px solid var(--ink);text-wrap:balance}
+h3{font-family:var(--sans);font-size:18.5px;font-weight:700;margin:34px 0 6px;text-wrap:balance}
+h4{font-family:var(--sans);font-size:15px;font-weight:700;margin:24px 0 4px;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+p{margin:0 0 15px;max-width:68ch}
+ul,ol{max-width:68ch;padding-left:20px;margin:0 0 15px}
+li{margin:0 0 7px}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.855em;background:var(--rule-soft);
+  padding:.1em .34em;border-radius:3px}
+pre{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--panel);
+  border:1px solid var(--rule);border-left:3px solid var(--accent);
+  padding:13px 15px;overflow-x:auto;margin:0 0 18px}
+pre code{background:none;padding:0;font-size:inherit}
+.eyebrow{font-family:var(--sans);font-size:11px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--signal);margin:0 0 8px}
+.lede{font-size:19.5px;line-height:1.5;color:var(--muted);max-width:64ch;margin:0 0 22px}
+.meta{font-family:var(--mono);font-size:12px;color:var(--muted);
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  padding:9px 0;margin:0 0 34px;display:flex;flex-wrap:wrap;gap:6px 22px}
+.tablewrap{overflow-x:auto;margin:0 0 20px;border:1px solid var(--rule);background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:14px}
+th{text-align:left;font-weight:700;font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);padding:9px 12px;border-bottom:1.5px solid var(--rule);
+  white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.n,th.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.q{border-left:3px solid var(--accent);background:var(--accent-soft);
+  padding:15px 18px;margin:0 0 18px}
+.q .k{font-family:var(--sans);font-weight:700;font-size:16px;display:block;margin-bottom:7px;
+  color:var(--ink);text-wrap:balance}
+.q p:last-child{margin-bottom:0}
+.refuse{border-left:3px solid var(--signal);background:var(--signal-soft);padding:14px 17px;margin:0 0 18px}
+.refuse .k{font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--signal);display:block;margin-bottom:6px}
+.refuse p:last-child{margin-bottom:0}
+.win{border-left:3px solid var(--good);background:var(--good-soft);padding:14px 17px;margin:0 0 18px}
+.win .k{font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--good);display:block;margin-bottom:6px}
+.win p:last-child{margin-bottom:0}
+.num{font-family:var(--mono);font-weight:700;color:var(--signal);font-variant-numeric:tabular-nums}
+.defs{display:grid;gap:0;margin:0 0 20px;border-top:1px solid var(--rule)}
+.defs>div{display:grid;grid-template-columns:1fr;gap:2px 16px;
+  padding:11px 0;border-bottom:1px solid var(--rule-soft)}
+@media(min-width:640px){.defs>div{grid-template-columns:172px minmax(0,1fr)}}
+.defs dt,.defs .t{font-family:var(--mono);font-size:12.5px;color:var(--accent);font-weight:700}
+.defs dd,.defs .d{margin:0;font-size:15.5px}
+footer{margin-top:60px;padding-top:20px;border-top:2px solid var(--ink);
+  font-family:var(--sans);font-size:13px;color:var(--muted)}
+@media print{
+  nav.toc{display:none}.wrap{grid-template-columns:1fr;max-width:none}
+  h2{break-after:avoid}.q,.refuse,.win,.tablewrap{break-inside:avoid}
+  body{font-size:11pt}
+}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="g">Foundations</div>
+  <a href="#one-minute">The one-minute answer</a>
+  <a href="#problem">1 · The problem</a>
+  <a href="#baseline">2 · MobileRAG baseline</a>
+  <a href="#contributions">3 · The five contributions</a>
+  <div class="g">The system</div>
+  <a href="#arch">4 · Architecture</a>
+  <a href="#stack">5 · Stack &amp; why</a>
+  <a href="#data">6 · Datasets</a>
+  <a href="#method">7 · Method &amp; rules</a>
+  <div class="g">Results</div>
+  <a href="#r-index">8 · Index (Phase 2)</a>
+  <a href="#r-cost">9 · Cost model</a>
+  <a href="#r-control">10 · Controller</a>
+  <a href="#r-scr">11 · SCR &amp; quality</a>
+  <a href="#r-joint">12 · Joint control</a>
+  <a href="#r-device">13 · On device</a>
+  <div class="g">Defence</div>
+  <a href="#findings">14 · Three findings</a>
+  <a href="#defects">15 · The 22 defects</a>
+  <a href="#qa">16 · Interview Q&amp;A</a>
+  <a href="#attack">17 · Hardest questions</a>
+  <a href="#glossary">18 · Glossary</a>
+</nav>
+
+<main>
+<p class="eyebrow">Viva preparation · final-year B.Tech capstone</p>
+<h1>SMART-ANN Viva Handbook</h1>
+<p class="lede">Everything the project is, every number it produced, and the questions an examiner will actually ask — including the ones you should hope they ask.</p>
+<div class="meta">
+  <span>50 commits</span><span>53 ADRs</span><span>447 tests</span>
+  <span>verification 7/7</span><span>3 datasets</span><span>7 figures</span>
+</div>
+
+<h2 id="one-minute">The one-minute answer</h2>
+<p>If you say nothing else, say this:</p>
+<div class="q">
+  <span class="k">"What is your project?"</span>
+  <p>A phone answering questions with AI has to search a vector index and then run a language model. Both cost battery and time. But a phone throttles when it gets hot, loses CPU to other apps, and drains — so a <em>fixed</em> configuration is wrong almost all the time: too slow when the device is stressed, needlessly expensive when it isn't.</p>
+  <p>SMART-ANN measures the device's real state — temperature, CPU pressure, battery — and changes how hard the retrieval searches, at runtime, to stay inside a latency or energy budget. I built it, measured it on a real Android phone, and tested the baseline's claims rather than assuming them.</p>
+</div>
+<p>Then offer the hook that makes them ask more: <em>"Two of my three main findings are negative — including one that identifies a missing term in the baseline paper's cost model."</em></p>
+
+<h2 id="problem">1 · The problem</h2>
+<h3>Why on-device RAG at all</h3>
+<p>Retrieval-Augmented Generation grounds a language model in a document corpus: retrieve relevant passages, put them in the prompt, generate an answer. Doing it <em>on the phone</em> rather than in the cloud buys privacy (documents never leave the device), offline operation, and no per-query server cost.</p>
+<h3>Why a phone is not a small server</h3>
+<ul>
+  <li><strong>Thermal throttling.</strong> Sustained load raises temperature; the SoC then reduces clocks. Measured on the target handset: skin temperature rose <span class="num">32.9 → 37.5 °C</span> over a 25-minute retrieval workload.</li>
+  <li><strong>Contention.</strong> Other apps take CPU unpredictably.</li>
+  <li><strong>Battery.</strong> Every query costs measurable energy — <span class="num">99.28 mJ</span> all-in on the target device.</li>
+  <li><strong>Heterogeneous cores.</strong> The target SoC has <strong>three</strong> clock domains, and one instant sample showed four cores at ratios 1.00, 0.61, 0.22 and 0.27 simultaneously.</li>
+</ul>
+<p>A static configuration must be tuned for the worst case (wasting capability most of the time) or the average case (missing its budget under stress). That gap is the opportunity.</p>
+
+<h2 id="baseline">2 · The MobileRAG baseline</h2>
+<p><strong>MobileRAG</strong> (arXiv:2507.01079) is the paper this project builds on and tests. Two components matter:</p>
+<h3>EcoVector</h3>
+<p>A memory-efficient ANN index for phones. The corpus is partitioned into <span class="num">N<sub>c</sub></span> clusters by k-means. A small HNSW graph over the <em>centroids</em> stays in RAM; the per-cluster vectors live on disk and are loaded only when that cluster is probed. This keeps resident memory far below the corpus size.</p>
+<h3>Selective Content Reduction (SCR)</h3>
+<p>Before generation, trim retrieved passages to the parts most relevant to the query, cutting prompt tokens and therefore generation cost.</p>
+<h3>The claim I tested</h3>
+<p>MobileRAG argues EcoVector beats IVF-on-disk when</p>
+<pre><code>ef_L · M'  &lt;  N / N_c</code></pre>
+<p>— i.e. when a per-cluster HNSW graph walk touches fewer vectors than a flat scan of that cluster. For SIFT1M, <code>N/N_c = 4000</code>, so the condition holds by a wide margin and per-cluster graphs should win. <strong>They do not.</strong> Finding 1 explains why.</p>
+
+<h2 id="contributions">3 · The five contributions</h2>
+<p>Each is separately ablatable — you can turn one off and measure the difference.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>ID</th><th>Claim</th><th>Status</th><th>Evidence / what's missing</th></tr></thead>
+<tbody>
+<tr><td class="n">C1</td><td>Runtime-adaptive ANN effort</td><td><strong>Demonstrated</strong></td><td>Three independent experiments. Narrowed by measurement to one effective dimension (<code>nprobe</code>).</td></tr>
+<tr><td class="n">C2</td><td>Adaptive SCR aggressiveness</td><td><strong>Demonstrated</strong></td><td>Quality measured at n=1000 with paired bootstrap CIs.</td></tr>
+<tr><td class="n">C3</td><td>Joint vs split control</td><td><strong>Supported</strong></td><td>3 joint cells on the quality/cost Pareto front. No controller exploits it yet.</td></tr>
+<tr><td class="n">C4</td><td>Energy-budget-constrained retrieval</td><td><strong>Half</strong></td><td>Energy measured on device; effort demonstrably drives power. Per-query attribution needs one more 20-min trace.</td></tr>
+<tr><td class="n">C5</td><td>Battery / device-state policy</td><td><strong>Built, not demonstrated</strong></td><td>Policy + 25 tests exist; never run against the handset in an experiment.</td></tr>
+</tbody></table></div>
+<div class="win"><span class="k">Say this, not "100% complete"</span>
+<p>"Two demonstrated, one supported, two partial — and the two partials are partial for different reasons. C4 has the measurement and lacks one run; C5 has the code and lacks an experiment." Knowing the difference between <em>code exists</em> and <em>claim supported</em> is precisely what a viva tests.</p></div>
+
+<h2 id="arch">4 · Architecture</h2>
+<h3>The two-phase search</h3>
+<p>The index splits retrieval so the controller can decide <em>after</em> seeing cheap evidence but <em>before</em> paying the expensive part:</p>
+<div class="defs">
+  <div><span class="t">probe(q, cfg)</span><span class="d">Searches the in-RAM centroid graph. Returns candidate cluster IDs, their distances, and cheap query features. Costs well under a millisecond.</span></div>
+  <div><span class="t">finish(q, probe, cfg)</span><span class="d">For each selected cluster: load from disk → search → unload → merge results. This is where nearly all the cost lives.</span></div>
+</div>
+<p>Why it matters: a controller can look at <code>probe</code> output and decide how many clusters to actually open. <strong>There is no rerank stage</strong> — it was specified, then removed once measurement showed the exact distances were already available from the cluster search, so reranking would recompute what was known.</p>
+<h3>Cluster storage</h3>
+<p>Clusters are stored flat (<code>.npy</code>, memory-mapped) rather than as per-cluster HNSW graphs. That is a <em>measured</em> decision, not a default — see Finding 1.</p>
+<h3>The control layer</h3>
+<div class="defs">
+  <div><span class="t">StaticPolicy</span><span class="d">Fixed config. The tuned baseline — grid-searched per scenario, never crippled.</span></div>
+  <div><span class="t">AimdPolicy</span><span class="d">Additive-increase / multiplicative-decrease on <code>nprobe</code>, like TCP congestion control. Has a <code>control_period_s</code> — the parameter whose absence caused the collapse.</span></div>
+  <div><span class="t">BudgetPolicy</span><span class="d">Reads a <em>table of measurements</em> (not the cost model) and picks the highest-recall level whose measured p95 fits the latency budget.</span></div>
+  <div><span class="t">DeviceStatePolicy</span><span class="d">C5. Derates the budget on temperature, thermal slope, battery level, throttling. Refuses to act on NaN — "not measured" is not "cold".</span></div>
+  <div><span class="t">EnergyBudgetPolicy</span><span class="d">C4. Integrates V·I·dt from a live source. <code>honours_energy_budget()</code> returns True <em>only</em> when a real source is wired in and declared.</span></div>
+</div>
+<h3>Why the budget policy looks up instead of predicting</h3>
+<p>The Phase 3 cost model holds at <span class="num">14.75%</span> MAPE inside its fitted regime and fails at <span class="num">35.87%</span> outside it, because <code>cpu_util</code> saturates at 1.0 — 12,469 contended samples pinned at exactly 1.000 while latency spanned 41×. A policy predicting from that model would be <em>most confident exactly where it is most wrong</em>, which is the situation the project exists to handle. So the policy reads measured percentiles instead.</p>
+
+<h2 id="stack">5 · Stack, and why each choice</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Component</th><th>Choice</th><th>Why this one</th></tr></thead>
+<tbody>
+<tr><td>Language</td><td class="n">Python 3.12.14</td><td>Pinned: <code>chroma-hnswlib 0.7.5</code>'s only Windows wheel is cp312. On 3.13 the install fails outright.</td></tr>
+<tr><td>ANN library</td><td class="n">chroma-hnswlib 0.7.5</td><td><strong>Not FAISS</strong> — FAISS is permitted only for brute-force ground truth in <code>scripts/</code>. Upstream <code>hnswlib</code> ships no Windows wheels; chroma's redistribution imports as <code>hnswlib</code> and its API is verified by a contract test.</td></tr>
+<tr><td>Embeddings</td><td class="n">sentence-transformers</td><td>gte-small, 384-d, unit-normalised.</td></tr>
+<tr><td>Generation</td><td class="n">flan-t5-base</td><td>Instruction-tuned, seq2seq, CPU-viable, answers extractively. A causal model of similar size spends budget on conversational framing that EM punishes.</td></tr>
+<tr><td>Sentence split</td><td class="n">pysbd</td><td>Shared between chunking and SCR, so windows align with chunk boundaries.</td></tr>
+<tr><td>Data frame</td><td class="n">pandas + pyarrow</td><td>One parquet row per query is the unit of <em>all</em> analysis.</td></tr>
+<tr><td>Validation</td><td class="n">pydantic</td><td>Config validation only — hot-path types are plain dataclasses to avoid per-query validation cost.</td></tr>
+<tr><td>Telemetry</td><td class="n">psutil + adb + Termux:API</td><td>psutil on the laptop; sysfs thermal zones and BatteryManager on the phone.</td></tr>
+</tbody></table></div>
+<div class="q"><span class="k">"Why not FAISS?"</span>
+<p>It was excluded by design. FAISS is a server-class library; the baseline paper's index is HNSW-based, and the project needed an index whose memory behaviour on a phone could be measured honestly. FAISS is still used — but only in <code>scripts/</code> for brute-force ground truth, where a fast exact search is exactly what's wanted.</p></div>
+
+<h2 id="data">6 · Datasets</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Dataset</th><th class="n">Vectors</th><th class="n">Queries</th><th class="n">Dim</th><th>Metric</th><th class="n">N<sub>c</sub></th><th>Role</th></tr></thead>
+<tbody>
+<tr><td>SIFT1M</td><td class="n">1,000,000</td><td class="n">10,000</td><td class="n">128</td><td>L2</td><td class="n">2000</td><td>Standard ANN benchmark; ships exact ground truth</td></tr>
+<tr><td>NYTimes</td><td class="n">289,761</td><td class="n">9,991</td><td class="n">256</td><td>cosine</td><td class="n">538</td><td>Different structure; source of the cluster-miss property</td></tr>
+<tr><td>SQuAD</td><td class="n">46,369</td><td class="n">1,000</td><td class="n">384</td><td>cosine</td><td class="n">215</td><td>Has <em>text</em> — the only set that can measure answer quality</td></tr>
+</tbody></table></div>
+<p>Three datasets is a strength, not padding: SIFT and NYTimes show the index generalises across metrics and distributions; SQuAD proves the pipeline answers real questions.</p>
+<p><strong>Where the data lives:</strong> outside the repository, at <code>C:\smartann-data</code>, because you never commit gigabytes to git. What <em>is</em> committed is the pipeline that fetches and verifies it, plus <code>MANIFEST.json</code> holding the SHA-256, source URL and preparation time of every artifact. <code>smartann data status</code> re-checks all of it and exits non-zero if anything is missing or altered.</p>
+<div class="q"><span class="k">"How do you know your ground truth is right?"</span>
+<p>SIFT1M and NYTimes ship published ground truth in their HDF5 files — an external reference. SQuAD's was computed by brute force. A regression test compares computed distances against <code>scipy.cdist</code> <em>by value</em>, which is how defect #4 was caught: <code>compute_topk</code> had dropped the ‖q‖² term, making every stored L2 distance wrong by a per-query constant.</p></div>
+
+<h2 id="method">7 · Method and the rules</h2>
+<p>Six rules were fixed before any code was written. They are the reason the defect list exists.</p>
+<ol>
+  <li><strong>Never fabricate numbers.</strong> No plotting script may contain a hardcoded result, example data, or a placeholder. Missing data must fail loudly.</li>
+  <li><strong>No silent stubs.</strong> Anything unimplemented raises <code>NotImplementedError</code> with a reason and appears in <code>TODO.md</code>. Never a plausible dummy value.</li>
+  <li><strong>The baseline must be tuned, not crippled.</strong> Per-scenario grid search.</li>
+  <li><strong>Every result reproducible from (config, seed).</strong> Each run writes a manifest with git SHA, config hash, library versions, hostname, seed, wall-clock bounds.</li>
+  <li><strong>Controller overhead is itself a measured metric.</strong> A control layer costing more than it saves is a negative result.</li>
+  <li><strong>Ask before adding a dependency.</strong></li>
+</ol>
+<h3>The capability gate</h3>
+<p>Every telemetry source publishes a <em>capability table</em> saying what it can and cannot measure. <code>assert_manifest_consistent()</code> refuses any run manifest claiming a measured value for a field the table calls unavailable. This is a gate, not a log — a false claim cannot reach the parquet.</p>
+<h3>Recall, done carefully</h3>
+<p>Recall is <strong>score-equality (tie-aware)</strong>, not index-overlap: when several vectors sit at identical distance, which IDs get returned is arbitrary, so counting ID matches penalises correct answers. The tolerance band is <code>atol + rtol·|threshold|</code>, sized from measurement rather than guessed.</p>
+<div class="refuse"><span class="k">A convention that bites</span>
+<p><code>hnswlib</code>'s <code>ip</code> space returns <strong>1 − inner_product</strong>, and its <code>l2</code> space returns <strong>squared</strong> distance. Distances can legitimately be negative — NYTimes reaches −1.918×10⁻⁷. Any assertion that distances are non-negative is wrong, and no code path may take a sqrt, log or division that assumes otherwise.</p></div>
+
+<h2 id="r-index">8 · Index results (Phase 2)</h2>
+<p><strong>15 acceptance checks: 14 PASS, 1 FAIL.</strong> The failure is correct and expected — it is a property of the NYTimes dataset, not a defect. The verification script expects exit code 1 for this step; demanding exit 0 could only be satisfied by hiding a real result.</p>
+<h3>Resident footprint vs the paper</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Dataset</th><th class="n">Measured</th><th class="n">MobileRAG Fig. 6</th><th class="n">Ratio</th></tr></thead>
+<tbody>
+<tr><td>SIFT1M</td><td class="n">12.01 MB</td><td class="n">9.67 MB</td><td class="n">1.24×</td></tr>
+<tr><td>NYTimes</td><td class="n">40.81 MB</td><td class="n">3.53 MB</td><td class="n">11.6×</td></tr>
+</tbody></table></div>
+<p>SIFT landing within 1.24× of the published figure is <em>independent evidence the index is built correctly</em> — the cheapest validation of the whole implementation available. NYTimes' 11.6× is an open question, recorded as such rather than explained away.</p>
+<div class="q"><span class="k">"How did you measure memory?"</span>
+<p>In a <strong>fresh subprocess</strong>. Measured inside a long-lived process, the same index read 5.18 MB or 38.24 MB depending on what ran before it — allocator state and page cache. That was defect #7, and it changed a headline claim from 1.47× to 11.36×.</p></div>
+
+<h2 id="r-cost">9 · The cost model (Phase 3)</h2>
+<p>Per-stage latency terms fitted by least squares on recorded runs:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Term</th><th class="n">MAPE (contended)</th><th class="n">Mean actual</th><th class="n">Mean predicted</th></tr></thead>
+<tbody>
+<tr><td><code>t_centroid</code></td><td class="n">33.69%</td><td class="n">0.418 ms</td><td class="n">0.087 ms</td></tr>
+<tr><td><code>t_cluster_load</code></td><td class="n">28.73%</td><td class="n">4.891 ms</td><td class="n">2.080 ms</td></tr>
+<tr><td><code>t_cluster_search</code></td><td class="n">31.17%</td><td class="n">0.968 ms</td><td class="n">0.475 ms</td></tr>
+<tr><td><code>t_merge</code></td><td class="n">71.86%</td><td class="n">0.044 ms</td><td class="n">0.015 ms</td></tr>
+</tbody></table></div>
+<p><strong>Total latency MAPE: 14.75% on quiet (target &lt;15%, PASS), 35.87% on contended (FAIL).</strong> Both reported.</p>
+<div class="q"><span class="k">"Why does the model fail under contention?"</span>
+<p><code>cpu_util</code> is a <strong>censored feature</strong>. It saturates at 1.0, so it cannot express contention <em>magnitude</em>: 12,469 samples all read exactly 1.000 while the latency they were supposed to explain spanned 41×. The model has no variable left to move. That is why the budget policy reads measured percentiles rather than predicting.</p></div>
+<div class="refuse"><span class="k">The energy model was correctly refused</span>
+<p>Phase 3's energy coefficients (3.85 V, 2300 µA CPU, 800 µA I/O) are <strong>MobileRAG's reported values for their device</strong> — not fitted here. The fitter <em>refuses</em> to fit, because the development laptop reports <code>energy_mj_measured</code> as unavailable: no RAPL on Windows, no populated <code>powercap</code> under WSL2. Any modelled energy is recorded as <code>energy_mj_model</code>, never as a measurement.</p></div>
+
+<h2 id="r-control">10 · The controller (Phase 6)</h2>
+<h3>The contention experiment</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Phase</th><th>Policy</th><th class="n">SLO violations</th><th class="n">recall@10</th><th class="n">median nprobe</th></tr></thead>
+<tbody>
+<tr><td>Contended</td><td>static</td><td class="n">28.2%</td><td class="n">0.8805</td><td class="n">16</td></tr>
+<tr><td>Contended</td><td>adaptive</td><td class="n">6.3%</td><td class="n">0.4079</td><td class="n">—</td></tr>
+<tr><td>Quiet</td><td>static</td><td class="n">0.7%</td><td class="n">0.8821</td><td class="n">16</td></tr>
+<tr><td>Quiet</td><td>adaptive</td><td class="n">6.1%</td><td class="n">0.4641</td><td class="n">1</td></tr>
+</tbody></table></div>
+<div class="refuse"><span class="k">Finding 2 — the control law collapsed</span>
+<p>Look at the <em>quiet</em> rows. With <strong>no disturbance at all</strong>, the adaptive policy sat at minimum effort (nprobe 1 against static's 16), missed the target <em>more</em> often than static, and gave up 0.418 recall for nothing.</p>
+<p><strong>Diagnosis:</strong> the control period was shorter than the observation delay. The policy acted, then acted again before its previous action could appear in the rolling p95 it was reading. Every action looked ineffective, so it kept decreasing. This is structural, not a tuning error — it's the same reason TCP paces congestion window per round-trip time, not per acknowledgement.</p>
+<p><strong>Confirmed by pre-declared test:</strong> the diagnosis was written down <em>with its predicted outcome</em> before the confirmatory run.</p></div>
+<h3>Three policies against one budget</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Policy</th><th class="n">p95 latency</th><th class="n">violations</th><th class="n">recall</th><th class="n">overhead p95</th></tr></thead>
+<tbody>
+<tr><td>static</td><td class="n">14.20 ms</td><td class="n">6.0%</td><td class="n">0.8480</td><td class="n">0.005%</td></tr>
+<tr><td>aimd</td><td class="n">13.44 ms</td><td class="n">4.3%</td><td class="n">0.8103</td><td class="n">0.644%</td></tr>
+<tr><td>budget</td><td class="n">9.51 ms</td><td class="n">0.2%</td><td class="n">0.7797</td><td class="n">—</td></tr>
+</tbody></table></div>
+<div class="q"><span class="k">"What does the controller cost?"</span>
+<p>Measured, per rule 5: <strong>p50 0.528%, p95 0.644%</strong> of query latency for AIMD; 0.003%/0.005% for static. Reported as <em>percentiles of the per-query ratio</em>, not a ratio of percentiles — the latter gave p95 <em>below</em> p50, which is impossible for one distribution, and understated the worst case 5×. That was defect #9.</p></div>
+
+<h2 id="r-scr">11 · Content reduction and answer quality (Phase 7)</h2>
+<p>SQuAD, n=1000, flan-t5-base, greedy decoding, one retrieval configuration held fixed. Paired bootstrap against <code>off</code>, 10,000 resamples.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Arm</th><th class="n">EM</th><th class="n">F1</th><th class="n">Tokens</th><th class="n">Reduction</th><th class="n">Gen ms</th><th class="n">ΔF1 (95% CI)</th></tr></thead>
+<tbody>
+<tr><td><code>off</code></td><td class="n">0.6060</td><td class="n">0.6769</td><td class="n">571</td><td class="n">—</td><td class="n">650</td><td class="n">baseline</td></tr>
+<tr><td><code>keep1_ext</code></td><td class="n">0.5950</td><td class="n">0.6661</td><td class="n">475</td><td class="n">19.4%</td><td class="n">536</td><td class="n">−0.0108 [−0.0212, −0.0009]</td></tr>
+<tr><td><code>keep2</code></td><td class="n">0.5850</td><td class="n">0.6569</td><td class="n">448</td><td class="n">25.2%</td><td class="n">514</td><td class="n">−0.0200 [−0.0329, −0.0083]</td></tr>
+<tr><td><code>keep1</code></td><td class="n">0.5110</td><td class="n">0.5824</td><td class="n">269</td><td class="n">61.4%</td><td class="n">346</td><td class="n">−0.0945 [−0.1154, −0.0740]</td></tr>
+</tbody></table></div>
+<p><strong>Reduction is not free at any level</strong> — every confidence interval excludes zero, including the mildest. But the trade-off is smooth and monotone, which is what a controller needs: <code>keep1</code> buys a 47% cut in generation latency for a 14% relative F1 loss.</p>
+<div class="refuse"><span class="k">The finding that decides whether SCR is worth having</span>
+<p>SCR's own cost is <strong>~8 ms warm</strong> but <strong>~1220 ms p95 cold on the query path</strong>, because it embeds every window of every retrieved chunk at query time. Those two numbers bracket the question: on-path it costs roughly 4× what it saves and cannot pay for itself; warm it is a clear win.</p>
+<p>The difference is <em>when</em> window embeddings are computed — and the corpus is <strong>static</strong>, so they could be computed once at index time. That is an implementation choice, not a property of the method. Recorded rather than acted on, because it would move the cost model's dominant term.</p></div>
+<div class="q"><span class="k">"How did you choose the reduction levels?"</span>
+<p>From measurement, after the first attempt failed. I sampled 3,000 SQuAD chunks: 1.4% hold one sentence, 22.6% two, <strong>76.0% exactly three</strong>. At a 2-sentence window a chunk yields at most two windows — so "keep the top 3" keeps everything, and three of my four arms came back <em>byte-identical to the baseline</em>. The reducer wasn't broken; the ladder was. Rebuilt at window size 1, which is the only setting with real dynamic range on this corpus.</p></div>
+
+<h2 id="r-joint">12 · Joint vs split control (Phase 8)</h2>
+<p>A 3×3 grid: <code>nprobe</code> ∈ {1, 4, 16} × SCR ∈ {off, keep2, keep1}, 250 questions per cell, cells <strong>interleaved</strong> round-robin.</p>
+<p><strong>Declared before the run:</strong> C3 is supported if some joint cell is <em>not dominated</em> by any single-dimension cell — at least as accurate <em>and</em> at least as cheap.</p>
+<p><strong>Result: 3 joint cells sit on the Pareto front.</strong> But the shape matters more than the verdict — no joint cell dominates the best single-dimension cell outright. The highest F1 is still retrieval-only at maximum effort. What joint control does is <strong>extend the frontier downward in cost</strong>, reaching operating points at 516–804 ms that neither dimension reaches alone. That is exactly the region an adaptive controller occupies under pressure.</p>
+<div class="refuse"><span class="k">This is the second verdict this experiment produced</span>
+<p>The first run <em>also</em> said "C3 supported" — and it was an artifact. One generation took <strong>20.4 minutes</strong> (the host slept), dragging that cell's mean cost to 6× its median; and I had run the cells in <strong>blocked</strong> order, so identical work cost 1.01 ms/token early and 1.96 ms/token late. Both single-dimension baselines sit at the highest nprobe — measured last, therefore slowest — so the drift inflated exactly the cells the joint cells were compared against.</p>
+<p>Re-run interleaved with median cost: ms/token spread fell to 1.11×, and the verdict survived with a different cell set. <em>A right answer from a broken measurement is indistinguishable from a right answer.</em></p></div>
+
+<h2 id="r-device">13 · On the device</h2>
+<p><strong>vivo I2304, Android 16, arm64-v8a, Snapdragon, 8 cores in 3 clock domains.</strong></p>
+<h3>Two findings before a single measurement</h3>
+<div class="refuse"><span class="k">hnswlib builds successfully and then crashes</span>
+<p>It compiles in 19 s, pip reports success, exit code 0 — and <code>import hnswlib</code> dies with <strong>SIGILL</strong> before executing a line. <code>setup.py</code> compiles with <code>-march=native</code>, and clang emitted an instruction this core lacks. <code>HNSWLIB_NO_NATIVE=1</code> fixes it completely. <em>Both builds exit 0; only running the code distinguishes them.</em></p></div>
+<div class="refuse"><span class="k">HNSW index files do not transfer</span>
+<p><code>load_index</code> refused the pushed graph. Not a truncated transfer — the file is <strong>byte-identical</strong> on both machines, same SHA-256. The writer is chroma-hnswlib 0.7.5, the reader upstream hnswlib 0.8.0, and neither can move to meet the other. Only the centroid graph is unportable (everything else is <code>.npy</code>), so it is rebuilt on-device in 0.016 s — and equivalence was <em>checked</em>: host and device both score recall@10 = <span class="num">0.9543</span> on the same 300 queries.</p></div>
+<h3>The thermal model (Phase 4) — fitted, never chosen</h3>
+<p>19,144 queries over 25.0 minutes, 478 thermal samples. Skin <span class="num">32.90 → 37.51 °C</span>.</p>
+<pre><code>dT/dt = +9.143e-04·work − 1.473e-02·(T − 34.57) − 1.421e-01
+τ = 68 s</code></pre>
+<div class="tablewrap"><table>
+<thead><tr><th class="n">Window</th><th class="n">n</th><th class="n">R²</th><th class="n">a (work)</th><th class="n">τ</th></tr></thead>
+<tbody>
+<tr><td class="n">3 s</td><td class="n">446</td><td class="n">0.109</td><td class="n">6.08e-04</td><td class="n">107 s</td></tr>
+<tr><td class="n">15 s</td><td class="n">89</td><td class="n">0.230</td><td class="n">9.43e-04</td><td class="n">67 s</td></tr>
+<tr><td class="n">30 s</td><td class="n">44</td><td class="n">0.304</td><td class="n">9.14e-04</td><td class="n">68 s ← chosen</td></tr>
+<tr><td class="n">60 s</td><td class="n">22</td><td class="n">0.187</td><td class="n">5.94e-04</td><td class="n">97 s</td></tr>
+<tr><td class="n">120 s</td><td class="n">11</td><td class="n">0.691</td><td class="n">8.69e-04</td><td class="n">76 s — excluded</td></tr>
+</tbody></table></div>
+<div class="q"><span class="k">"Your R² is only 0.30. Isn't that a bad model?"</span>
+<p>It is honest, and the sweep is the answer. The differencing window moves R² sixfold, so reporting one row would hide that the result depends on a choice no reader would question. The 120 s row scores highest and I <strong>excluded</strong> it: eleven points against three free parameters flatters itself.</p>
+<p>What convinces is <strong>stability</strong>: τ stays 67–107 s and <code>a</code> stays 5.9–9.4e-04 across <em>every</em> window while R² swings from 0.11 to 0.69. Point estimates that barely move across analysis choices are stronger evidence than any single goodness-of-fit.</p>
+<p>Short windows fail for a measurable reason: skin rose ~0.003 °C/s, while 3-second differencing yields a dT/dt whose standard deviation is 0.051 °C/s — <strong>sixteen times the signal</strong>. The sensor quantises at ~0.005 °C, so short differencing measures quantisation, not physics.</p></div>
+<div class="win"><span class="k">Why τ = 68 s is the most useful number in the project</span>
+<p>It is the thermal <em>observation delay</em>. Phase 6's control law collapsed because its control period was shorter than its observation delay. This says any thermally-aware controller sampling faster than ~68 s reproduces that collapse — and now there is a measured number saying so instead of an argument.</p></div>
+<h3>Device latency</h3>
+<div class="tablewrap"><table>
+<thead><tr><th class="n">nprobe</th><th class="n">p50</th><th class="n">p95</th></tr></thead>
+<tbody>
+<tr><td class="n">1</td><td class="n">5.59 ms</td><td class="n">13.82 ms</td></tr>
+<tr><td class="n">4</td><td class="n">20.50 ms</td><td class="n">52.26 ms</td></tr>
+<tr><td class="n">8</td><td class="n">40.46 ms</td><td class="n">101.46 ms</td></tr>
+<tr><td class="n">16</td><td class="n">82.61 ms</td><td class="n">189.82 ms</td></tr>
+<tr><td class="n">32</td><td class="n">169.21 ms</td><td class="n">354.10 ms</td></tr>
+</tbody></table></div>
+<p>Clean linear scaling, and roughly <strong>13× slower than the laptop</strong> — the gap that makes adaptive effort worth having on a phone at all.</p>
+<h3>Energy (C4)</h3>
+<p>15,425 queries, 20.0 minutes, <strong>unplugged</strong>, 209 samples, zero read failures. Every sample DISCHARGING; every current negative.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Quantity</th><th class="n">Value</th></tr></thead>
+<tbody>
+<tr><td>Total energy</td><td class="n">1531.4 J</td></tr>
+<tr><td>Mean power</td><td class="n">1.277 W</td></tr>
+<tr><td>p5 / p95 power</td><td class="n">0.736 / 2.218 W</td></tr>
+<tr><td>All-in per query</td><td class="n">99.28 mJ</td></tr>
+<tr><td>Voltage range</td><td class="n">4.022 – 4.132 V</td></tr>
+</tbody></table></div>
+<p><strong>Effort drives power, and this needs no model:</strong></p>
+<div class="tablewrap"><table>
+<thead><tr><th class="n">Work (clusters/s)</th><th class="n">Median power</th></tr></thead>
+<tbody>
+<tr><td class="n">95 – 126</td><td class="n">0.864 W</td></tr>
+<tr><td class="n">126 – 141</td><td class="n">0.925 W</td></tr>
+<tr><td class="n">141 – 153</td><td class="n">0.989 W</td></tr>
+<tr><td class="n">153 – 189</td><td class="n">1.330 W</td></tr>
+<tr><td class="n">189 – 251</td><td class="n">1.940 W</td></tr>
+</tbody></table></div>
+<p>A 2.6× increase in retrieval work costs a 2.2× increase in power, correlation +0.645. <strong>That is C4's premise demonstrated on real hardware.</strong></p>
+<div class="refuse"><span class="k">The number I refused to report</span>
+<p>Marginal energy per cluster fits at R² 0.415 and returns an idle power of <strong>−0.209 W</strong>. A phone idling at negative 209 milliwatts does not exist.</p>
+<p>Work rate spans 95–251 clusters/s and never approaches zero, so the intercept extrapolates 95 units past the nearest observation. Independently: at the trace's mean effort the marginal term predicts 115 mJ/query against a measured all-in average of 99.3 mJ/query — the marginal exceeds the total, with the negative intercept absorbing the difference.</p>
+<p>It is computed, recorded as <code>reportable: false</code>, and printed <em>with its reasoning</em>. The fix is an <strong>experiment</strong> change, not an analysis change: duty-cycle the trace so the baseline is measured rather than extrapolated. That instrumentation is built and tested; what remains is 20 minutes of handset time.</p></div>
+<div class="q"><span class="k">"How do you know negative current means discharge?"</span>
+<p>Calibrated, not assumed. Three phases — idle / load / idle — on battery, sampling every 3 s. All 40 samples negative while discharging, no exceptions. Load cost −419 mA against the pre-baseline and −497 mA against the post; the idle drift between the two baselines was +78 mA, which is <em>why</em> both were measured.</p>
+<p>And cross-checked two independent ways: the coulomb counter fell 19,000 µAh over 148 s (= 462 mA mean) while integrating the current sensor gave 524 mA. <strong>Within 12%, neither derived from the other.</strong></p></div>
+
+<h2 id="findings">14 · The three findings</h2>
+<div class="win"><span class="k">Finding 1 — MobileRAG's per-cluster graphs do not pay</span>
+<p>The paper's condition <code>ef_L · M' &lt; N/N_c</code> predicts per-cluster HNSW graphs should win comfortably (SIFT1M: N/N_c = 4000). Measured, they lose.</p>
+<p><strong>Why: a missing term.</strong> The paper prices cluster access as pure I/O — bytes read from disk. Measurement shows <strong>deserialisation is 95–99% of the load cost</strong>. Materialising a graph structure costs far more than materialising a flat array, and the paper's model has no term for it. The condition is right about comparisons and silent about materialisation.</p>
+<p>This is the sharpest framing: not "graphs are bad" but "<em>the published cost model omits the dominant term</em>."</p></div>
+<div class="win"><span class="k">Finding 2 — the control law collapsed, and the diagnosis is structural</span>
+<p>Control period shorter than observation delay ⇒ the controller acts before it can see its previous action ⇒ every action looks ineffective ⇒ monotone decrease to the floor. Pre-declared and confirmed. The fix is a control period, and Phase 4 now supplies the measured delay it must exceed for thermal control: <strong>68 s</strong>.</p></div>
+<div class="win"><span class="k">Finding 3 — context reduction is not free, and SCR cannot pay for itself as implemented</span>
+<p>Every reduction level costs answer quality significantly (all CIs exclude zero). And SCR costs ~1220 ms on the query path to save ~300 ms of generation. The escape is precomputation, not adaptation — the corpus is static.</p></div>
+
+<h2 id="defects">15 · The 22 defects and seven detection mechanisms</h2>
+<p>Every one was caught <em>before</em> it produced a reported number. Ranked by how likely each was to survive undetected, which is not the same as severity.</p>
+<h3>The most instructive ones</h3>
+<div class="defs">
+  <div><span class="t">#1</span><span class="d">Acceptance check 4 compared an index <em>with itself</em> and reported PASS. A broken check catches nothing, including itself.</span></div>
+  <div><span class="t">#2</span><span class="d">A generated conclusion carried a hardcoded verdict beside computed numbers — it printed "the control law does not work" next to a <em>negative</em> recall cost. No test asserts on English.</span></div>
+  <div><span class="t">#3</span><span class="d">The static baseline was not tuned and the manifest said it was. Selection met the target by construction, because the target was derived from the same row.</span></div>
+  <div><span class="t">#4</span><span class="d"><code>compute_topk</code> dropped ‖q‖², making every ground-truth distance wrong by a per-query constant — and <em>plausible</em>.</span></div>
+  <div><span class="t">#6</span><span class="d">Uncapped <code>ef·M</code> overstated work by up to 29.5×, on the field the cost model regresses against.</span></div>
+  <div><span class="t">#7</span><span class="d">Footprint measured in a long-lived process: same index read 5.18 MB or 38.24 MB.</span></div>
+  <div><span class="t">#9</span><span class="d">Overhead as a ratio of percentiles gave p95 <em>below</em> p50 — impossible for one distribution.</span></div>
+  <div><span class="t">#14</span><span class="d">Timing runs corrupted by background load, <strong>four times</strong> — including once by this project's own O(n²) figure generation perturbing the latencies it was plotting.</span></div>
+  <div><span class="t">#17</span><span class="d">The CLI entry point never ran. <code>cli.py</code> had no <code>__main__</code> guard, so <code>python -m smartann.cli &lt;anything&gt;</code> imported the module, ran nothing and exited <strong>0</strong>. Every runbook command used that form — and <code>verify_all.py</code> routed its data-status check <em>through the broken entry point</em> and scored the silent success as a pass. The reported 7/7 was 6/7.</span></div>
+  <div><span class="t">#18</span><span class="d">Three of four ablation rungs were the same rung — byte-identical to the baseline. They read as "reduction is free" rather than "reduction did not happen".</span></div>
+  <div><span class="t">#19</span><span class="d">Two thirds of the generation baseline was silently truncated at 512 tokens, making the "full context" arm a <em>position-based</em> reduction.</span></div>
+  <div><span class="t">#20</span><span class="d">A "C3 supported" verdict that was pure measurement drift.</span></div>
+  <div><span class="t">#21</span><span class="d">A build that succeeds (exit 0, wheel produced) and then SIGILLs on import.</span></div>
+</div>
+<h3>Seven detection mechanisms, by cost</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Mechanism</th><th>Cost</th><th>What it catches</th></tr></thead>
+<tbody>
+<tr><td>Loud failure</td><td>Free</td><td>Fork bomb — the machine fell over</td></tr>
+<tr><td>A user running the documented command</td><td>Free, but not ours</td><td>#17. Every internal check had passed, including the one built to catch exactly this</td></tr>
+<tr><td>Reading the code</td><td>Cheap, unreliable</td><td>6 of 22 — "not a system"</td></tr>
+<tr><td>Rendering the artifact and looking</td><td>Cheap</td><td>Empty figure panels; script exited 0 and wrote a valid PNG</td></tr>
+<tr><td>Rereading a generated conclusion</td><td>Its own category</td><td>#2 — numbers right, sentence wrong, and nothing reruns a sentence</td></tr>
+<tr><td>An invariant the data must satisfy</td><td>Cheap</td><td>#20, #21 — ms/token must be constant for identical work; a library that builds must also run</td></tr>
+<tr><td><strong>External reference</strong></td><td><strong>Expensive</strong></td><td>The <em>only</em> category that catches errors producing plausible numbers</td></tr>
+</tbody></table></div>
+<div class="win"><span class="k">The generalisation — say this if asked what you learned</span>
+<p>"Cost of detection is inversely proportional to how loudly a defect fails. A fork bomb costs minutes. A recall metric quietly off by a per-query constant costs however long it takes someone to distrust something that looks fine."</p>
+<p>"And a test suite validates a system against its own assumptions — so the errors that survive are exactly the ones the assumptions share. That's why external references matter, and why generated prose is outside the test suite entirely."</p></div>
+
+<h2 id="qa">16 · Interview Q&amp;A</h2>
+<h3>Scope and novelty</h3>
+<div class="q"><span class="k">"What's novel here? Adaptive systems aren't new."</span>
+<p>Correct — AIMD is from TCP, thermal throttling is standard. The novelty is the <em>application and the measurement</em>: nobody has published measured energy and thermal cost per unit of ANN retrieval effort on a real handset, tied to a control loop with a measured observation delay. And the by-product is a correction to a published cost model.</p></div>
+<div class="q"><span class="k">"Isn't this just engineering?"</span>
+<p>The engineering is the instrument. The research output is three findings — two negative — that change what someone should build: per-cluster graphs don't pay because of a missing materialisation term; a thermal controller must respect a 68-second observation delay; and SCR as commonly implemented costs more than it saves unless embeddings are precomputed.</p></div>
+<h3>Method</h3>
+<div class="q"><span class="k">"How do you know your baseline isn't strawmanned?"</span>
+<p>Rule 3 was fixed before any code: the static baseline is grid-searched per scenario. And it was audited — defect #3 caught a version where <code>max(key=...)</code> returned the largest candidate unconditionally <em>and</em> the target was derived from that same row, so selection met the target by construction. Fixed by anchoring the target on the median candidate.</p></div>
+<div class="q"><span class="k">"Why should I believe your timings?"</span>
+<p>Because I stopped believing them four times. Background load corrupted measurements repeatedly, so the acceptance script now samples CPU for the <em>whole</em> run and exits with a distinct code (2, not 1) if more than 10% of samples exceed threshold — a contaminated run is the <em>absence</em> of a result, not a result. Configurations are interleaved round-robin, never blocked, because a blocked sweep measures machine drift as much as code.</p></div>
+<div class="q"><span class="k">"Your sample sizes?"</span>
+<p>n=1000 questions for answer quality with 10,000-resample paired bootstrap; 250 per cell for the joint surface; 19,144 and 15,425 queries for the device traces; 3,829 per effort level in the device sweep. Where n is small — the 11-point thermal window — I say so and exclude the result.</p></div>
+<h3>Technical detail</h3>
+<div class="q"><span class="k">"Explain your recall metric."</span>
+<p>Score-equality (tie-aware) recall@k. When multiple vectors share a distance, which IDs are returned is arbitrary, so index-overlap recall penalises correct answers. I compare <em>distances</em> against ground-truth distances with a combined tolerance <code>atol + rtol·|threshold|</code>, sized from measurement. Duplicate retrieved IDs are rejected outright.</p></div>
+<div class="q"><span class="k">"Why nprobe and not ef_search?"</span>
+<p>Measurement narrowed it. <code>ef_centroid</code> is effectively free — the centroid graph is tiny — and <code>ef_list</code> turned out inert given flat cluster storage. So the action space is <strong>one-dimensional by measurement</strong>, and I state C1 as "adaptive retrieval effort" rather than "several ANN parameters". That narrowing is itself a result.</p></div>
+<div class="q"><span class="k">"What is τ and where does it come from?"</span>
+<p>The thermal time constant of a first-order lumped-mass model: <code>dT/dt = a·work + b·(T − T_ref) + c</code>, with τ = −1/b. It says how long a change in retrieval effort takes to appear in temperature. Fitted from a 25-minute device trace, τ = 68 s, stable across every differencing window.</p></div>
+<h3>Limitations — volunteer these</h3>
+<div class="q"><span class="k">"What are the limitations?"</span>
+<ul>
+<li><strong>One device.</strong> All device results are from a single vivo I2304. Thermal constants are device-specific by nature.</li>
+<li><strong>C4 half.</strong> Energy is measured; per-query attribution needs a duty-cycled trace.</li>
+<li><strong>C5 unproven.</strong> Policy and tests exist; no experiment against live telemetry.</li>
+<li><strong>Cost model fails under contention</strong> (35.87% MAPE) because <code>cpu_util</code> is censored.</li>
+<li><strong>NYTimes footprint 11.6× the paper</strong> — open, recorded, unexplained.</li>
+<li><strong><code>freq_ratio</code> is a scalar</strong> and the SoC has three clock domains. Unresolved by choice, because the fix changes what the controller may claim.</li>
+</ul></div>
+
+<h2 id="attack">17 · The hardest questions</h2>
+<div class="q"><span class="k">"You found the baseline's model is wrong. Are you sure it isn't your implementation?"</span>
+<p>Fair, and it's why the footprint check exists. SIFT1M's measured resident memory lands within <strong>1.24×</strong> of MobileRAG's published Figure 6 — independent evidence the index is built correctly. If my implementation were broken, that number wouldn't land near theirs. Separately, the materialisation cost is measured directly per stage, not inferred from the discrepancy.</p></div>
+<div class="q"><span class="k">"Your adaptive policy is worse than static on recall. Doesn't that defeat the point?"</span>
+<p>Under contention it cut SLO violations from 28.2% to 6.3% — that's the trade, and it's the intended one. But in the <em>quiet</em> phase it was worse on both axes, and I report that as a failure of the control law, diagnosed structurally. The mechanism works; the first control law was wrong; the fix is a control period no shorter than the observation delay, which I have now measured.</p></div>
+<div class="q"><span class="k">"You reported 7/7 verification earlier and it was 6/7. Why should I trust the current number?"</span>
+<p>Because I found that myself and wrote it down. The data-status check was routed through a broken entry point that exited 0 while doing nothing. It's now fixed, the entry point is tested <em>as a subprocess</em> (an in-process test runner cannot catch it), and <code>verify_all.py</code> fails any step producing no output at all — an exit code is a claim, output is evidence.</p></div>
+<div class="q"><span class="k">"Why is one acceptance check failing?"</span>
+<p>Deliberately. NYTimes check 4 fails because of a cluster-miss property of that dataset, not a defect. The verification expects exit 1 there. A verification demanding exit 0 could only be satisfied by hiding a real result — and the earlier version used a boolean "ignore the code" flag that tolerated <em>every</em> outcome, including a timeout. That was defect #16.</p></div>
+<div class="q"><span class="k">"How much of this is reproducible?"</span>
+<p>All of it, from <code>(config, seed)</code>. Every run writes a manifest with git SHA, config hash, library versions, hostname, seed and wall-clock bounds. <code>scripts/verify_all.py</code> re-runs seven steps through the <em>documented entry points</em> — tests, lint, types, data status, index acceptance, cost fit, figures — and currently reports 7/7 with a recorded machine-load profile proving the run was uncontaminated.</p></div>
+<div class="q"><span class="k">"What would you do with six more months?"</span>
+<ol>
+<li>Finish C4's per-query attribution — instrumentation is built, it needs one run.</li>
+<li>Run C5 against live telemetry, with a control period ≥ 68 s.</li>
+<li>Precompute SCR window embeddings at index time and re-fit — that alone may flip SCR from a loss to a win.</li>
+<li>Replicate on a second handset, since thermal constants are device-specific.</li>
+<li>Resolve <code>freq_ratio</code> to a per-cluster vector and re-examine what the controller can claim.</li>
+</ol></div>
+
+<h2 id="glossary">18 · Glossary</h2>
+<div class="defs">
+  <div><span class="t">ANN</span><span class="d">Approximate Nearest Neighbour — trade exactness for speed when searching high-dimensional vectors.</span></div>
+  <div><span class="t">RAG</span><span class="d">Retrieval-Augmented Generation — retrieve passages, put them in the prompt, generate.</span></div>
+  <div><span class="t">HNSW</span><span class="d">Hierarchical Navigable Small World — a graph index. <code>M</code> = edges per node; <code>ef</code> = search beam width.</span></div>
+  <div><span class="t">IVF</span><span class="d">Inverted File — partition vectors into clusters, search only the nearest few.</span></div>
+  <div><span class="t">nprobe</span><span class="d">How many clusters to open per query. The effective control dimension.</span></div>
+  <div><span class="t">N<sub>c</sub></span><span class="d">Number of clusters. N/N<sub>c</sub> is the mean cluster size.</span></div>
+  <div><span class="t">recall@k</span><span class="d">Fraction of the true top-k that the approximate search returned.</span></div>
+  <div><span class="t">EM / F1</span><span class="d">Exact Match and token-level F1 — SQuAD's answer-quality metrics, scored as the maximum over several gold answers.</span></div>
+  <div><span class="t">MAPE</span><span class="d">Mean Absolute Percentage Error — the cost model's accuracy measure.</span></div>
+  <div><span class="t">SLO</span><span class="d">Service Level Objective — here, the per-query latency target.</span></div>
+  <div><span class="t">AIMD</span><span class="d">Additive Increase, Multiplicative Decrease — TCP's congestion control law.</span></div>
+  <div><span class="t">τ (tau)</span><span class="d">Thermal time constant: how long an effort change takes to show up in temperature. Measured: 68 s.</span></div>
+  <div><span class="t">ADR</span><span class="d">Architecture Decision Record. This project has 53, each explaining one non-obvious choice.</span></div>
+  <div><span class="t">Pareto front</span><span class="d">The set of configurations not beaten on both axes at once.</span></div>
+  <div><span class="t">Censored feature</span><span class="d">A variable that saturates and stops carrying information — here <code>cpu_util</code> pinned at 1.0.</span></div>
+</div>
+
+<footer>
+<p><strong>SMART-ANN</strong> — runtime resource-aware adaptive control for on-device RAG. Baseline: MobileRAG, arXiv:2507.01079.</p>
+<p>Every figure in this document comes from a stored measurement. Full reasoning for each non-obvious choice is in <code>docs/decisions.md</code> (53 ADRs); the report is <code>docs/review.md</code>; commands are in <code>docs/RUNBOOK.md</code>.</p>
+<p><em>Print this page to PDF from your browser — the layout is set up for it.</em></p>
+</footer>
+</main>
+</div>

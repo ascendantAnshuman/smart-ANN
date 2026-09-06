@@ -24,3 +24,8 @@ build/
 *.swp
 Thumbs.db
 desktop.ini
+
+# Generated deliverable: regenerate from docs/viva_handbook.html with
+#   chrome --headless=new --no-pdf-header-footer --print-to-pdf=... file:///...
+# The source is committed; the 971 KB binary is not.
+docs/*.pdf
