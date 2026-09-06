@@ -68,7 +68,7 @@ STEPS = [
     Step(
         "test suite",
         [PY, "-m", "pytest", "tests/", "-q"],
-        "359 tests. The first thing a reader would run, and the cheapest signal "
+        "447 tests. The first thing a reader would run, and the cheapest signal "
         "that the tree is coherent.",
     ),
     Step(
@@ -93,7 +93,8 @@ STEPS = [
         [PY, "scripts/phase2_acceptance.py", "--datasets", "sift1m", "nytimes"],
         "The 15 index checks against real data. Expected 14 PASS / 1 FAIL -- the "
         "NYTimes cluster-miss property, which is a dataset fact and not a defect. "
-        "Exit 1 is therefore expected; a timeout or a crash is not. Exit 2 means "
+        "Exit 1 is therefore expected; a timeout or a crash is not. Exit 3 means the "
+        "machine-quiet guard REFUSED to start, which is not a result either. Exit 2 means "
         "another workload ran during the measurement and every duration is "
         "meaningless -- it is deliberately NOT in the expected set, because a "
         "contaminated run is the absence of a result rather than a result.",

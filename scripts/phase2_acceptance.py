@@ -801,7 +801,17 @@ def main() -> int:
     watch = MachineWatch()
     watch.start()
     if not args.allow_busy:
-        assert_machine_quiet()
+        try:
+            assert_machine_quiet()
+        except RuntimeError as exc:
+            # Exit 3, not 1. An uncaught raise here exits 1, which is the code
+            # that means "one check legitimately failed" -- so verify_all.py,
+            # which expects (0, 1) for this step, scored a REFUSAL TO START as
+            # a reproduction. The step took 1.5 s against its usual ~800 s and
+            # still went green. Distinct codes, because a guard declining to
+            # measure is not a measurement (ADR-0057).
+            print(f"REFUSED TO START: {exc}", file=sys.stderr, flush=True)
+            return 3
 
     checks = {
         "1a": lambda: check1a_exhaustive_equivalence(),

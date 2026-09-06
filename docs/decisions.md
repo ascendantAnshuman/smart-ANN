@@ -2835,3 +2835,69 @@ between the two runs it converted a false positive into a precise negative.
 
 The honest claim is: **the machinery for C5 is built, tested, and works when it
 fires; the device never gave it a reason to fire that mattered.**
+
+---
+
+## ADR-0057 — Two defects a user's terminal paste exposed
+
+**Status.** Accepted. 2026-09-06. Defects #24 and #25.
+
+Both were found the same way ADR-0042 was: someone ran the documented commands
+and pasted the output. Neither was visible from inside the project.
+
+### #24 — the documented energy command regenerated the superseded result
+
+`fit_energy_model.py` defaulted to `--prefix e2_`, the earlier **continuous**
+trace, not `c4_`, the duty-cycled one whose baseline is measured rather than
+extrapolated (ADR-0053, ADR-0054).
+
+So running the command in the runbook printed
+`PER-QUERY ATTRIBUTION: NOT REPORTABLE` with `intercept -0.209 W` — the result
+that had already been superseded — **and overwrote
+`results/energy_model.json` with it.** A reader following the documentation
+would have concluded C4 was unresolved, and the good result would have been
+silently destroyed.
+
+The default is now `c4_`. `e2_` is kept and still loadable, for comparison.
+
+**The general shape:** when a superseded artifact and its replacement live side
+by side, the default must point at the replacement. A default that points at
+history is a trap with a documentation-shaped entrance.
+
+### #25 — a guard refusing to start looked like a check that failed
+
+`assert_machine_quiet()` raised an uncaught `RuntimeError` when the machine was
+26% busy. An uncaught raise exits **1** — and 1 is the code that means *"one
+check legitimately failed"*, which `verify_all.py` lists as expected for that
+step.
+
+So the acceptance step declined to run, exited 1, and the verification scored
+it **OK**. It reported **7/7**. The only trace of the problem was the duration:
+**1.5 s against a usual ~800 s**, which nothing was checking.
+
+This is the sixth instance of ADR-0037's pattern — *a verdict that does not
+depend on what it is checking* — and the second time the verification harness
+itself has been the host.
+
+The guard now returns **exit 3**, which is in no step's expected set. The
+project's exit codes now separate four states that were previously conflated:
+
+| code | meaning | a result? |
+|---|---|---|
+| 0 | everything passed | yes |
+| 1 | a check failed | **yes** — a finding |
+| 2 | another workload contaminated the measurement | no |
+| 3 | the guard refused to start | no |
+| −1 | timed out | no |
+
+Codes 2 and 3 both exist because both were once reported as successes.
+
+### The pattern across #17, #24 and #25
+
+All three were invisible from inside and obvious from outside. The project's
+own checks could not see them because the checks ran through the same broken
+path, used the same stale default, or accepted the same ambiguous code.
+
+`docs/UNDERSTANDING.md` is added partly for this reason: it documents what each
+number *should* look like, so a reader comparing their terminal against it has
+something concrete to disagree with.

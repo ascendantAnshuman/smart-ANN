@@ -57,7 +57,11 @@ def load_jsonl(path: Path) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--trace-dir", default="results/device")
-    ap.add_argument("--prefix", default="e2_")
+    # c4_ is the DUTY-CYCLED trace (ADR-0053/0054), the one whose baseline is
+    # measured rather than extrapolated. The default used to be e2_, the earlier
+    # continuous trace, so running the documented command regenerated the
+    # SUPERSEDED "not reportable" result and overwrote the good one.
+    ap.add_argument("--prefix", default="c4_")
     ap.add_argument("--out", default="results/energy_model.json")
     args = ap.parse_args()
 
