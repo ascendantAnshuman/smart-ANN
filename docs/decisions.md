@@ -2696,3 +2696,66 @@ supports the estimate is not its R² but that it excludes zero, that its
 intercept is physical, and that the intercept is corroborated by direct
 measurement. A tighter number wants a longer trace with the screen off and
 flight mode on — which would also make it less representative of real use.
+
+---
+
+## ADR-0055 — A C5 experiment that measured its own headroom
+
+**Status.** Accepted. 2026-09-06. Defect #23.
+
+**What it looked like.** The first on-device C5 run reported a clean win:
+
+```
+arm             n    p95 ms   viol %   recall  nprobe p50
+static      19719     84.68     1.1%   0.9056           8
+adaptive    19719     43.29     0.0%   0.8058           4
+```
+
+Zero violations against static's 1.1%, on a phone that heated from 27.9 to
+35.3 °C during the run. Read at face value: C5 demonstrated.
+
+**What was actually happening.** The summary also records how many adaptive
+decisions cited a device signal, and that column is why this was caught:
+
+```
+adaptive nprobe distribution:            {4: 19719}   -- every query
+  decisions citing device state:   542   -> chose 4
+  decisions taken blind:        19,177   -> chose 4
+```
+
+**Device state changed the decision zero times.** The 542 readings that cited
+temperature picked exactly what the 19,177 blind ones picked.
+
+The gap came from a budget mismatch built into the experiment.
+`DeviceStatePolicy` applies a `headroom` of 0.9, so the adaptive arm was
+selecting against **99 ms** while the static arm used the raw **110 ms**. The
+device-measured p95 for `nprobe=8` is 101.5 ms — above 99, below 110. So the
+two arms were separated before device state was consulted at all, and the
+experiment compared two budgets.
+
+**Why it survived writing.** The script was built carefully: interleaved arms,
+a tuned baseline, a falsification criterion stated in its own docstring. All of
+that was about how the arms were *run*. The defect was in what they were run
+*against*, and no amount of care in the loop reaches that.
+
+This is the fifth instance of ADR-0037's pattern — *a comparison whose outcome
+does not depend on the thing being tested* — after an index compared with
+itself, a hardcoded narrative sentence, a tolerance flag accepting every
+outcome, and a verification routed through the entry point it was verifying.
+
+**What caught it.** The `adaptive_decisions_with_a_reason` counter, written
+into the script specifically so that "the policy ran but never saw anything"
+could not masquerade as a result. It was added defensively and it fired on the
+first run. The instinct to instrument the *absence* of an effect is worth more
+than the instinct to instrument its presence.
+
+**The fix.** `--headroom`, defaulting to **1.0**, and the static baseline now
+selects against `budget × headroom` — the same effective budget as the adaptive
+arm. Any remaining difference is device state or nothing.
+
+**A finding the failed run established anyway.** Every reason ever cited was
+`temperature rising` at +0.06 to +0.13 °C/s. The absolute tiers — 42 °C warm,
+46 °C hot (ADR-0049) — **never fired**, because skin peaked at 35.3 °C. On this
+workload the handset does not get hot enough for a temperature-level policy to
+act, and the thermal *slope* is the only device signal with anything to say.
+That bounds what C5 can claim on this device regardless of the re-run's outcome.

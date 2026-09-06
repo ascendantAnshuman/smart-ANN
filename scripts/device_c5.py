@@ -132,6 +132,16 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--budget-ms", type=float, default=110.0)
     ap.add_argument("--sample-period", type=float, default=5.0)
+    ap.add_argument(
+        "--headroom",
+        type=float,
+        default=1.0,
+        help="DeviceStatePolicy headroom. MUST be 1.0 for a fair comparison: at "
+        "0.9 the adaptive arm silently gets a 99 ms budget against static's 110 ms, "
+        "which excludes nprobe=8 (device p95 101.5 ms) before device state is "
+        "consulted at all. The first run of this experiment did exactly that and "
+        "measured headroom rather than device awareness (ADR-0055).",
+    )
     ap.add_argument("--out", default="/sdcard/smartann/c5")
     args = ap.parse_args()
 
@@ -163,15 +173,18 @@ def main() -> int:
 
     # The static arm is the best DEVICE-measured level that fits the budget --
     # what a competent engineer ships after profiling, not a strawman.
-    static_entry = table.best_within(args.budget_ms)
+    # BOTH arms start from the same effective budget. Without this the
+    # comparison is between two budgets, and device state never gets a vote.
+    static_entry = table.best_within(args.budget_ms * args.headroom)
     print(
-        f"budget {args.budget_ms:.0f} ms -> static baseline nprobe="
+        f"budget {args.budget_ms:.0f} ms x headroom {args.headroom:.2f} "
+        f"-> static baseline nprobe="
         f"{static_entry.nprobe} (device p95 {static_entry.p95_ms:.1f} ms, "
         f"recall {static_entry.recall:.4f})",
         flush=True,
     )
 
-    policy = DeviceStatePolicy(table, base, scr_off)
+    policy = DeviceStatePolicy(table, base, scr_off, headroom=args.headroom)
     policy.reset()
 
     telem = Telemetry(args.sample_period)
@@ -300,6 +313,8 @@ def main() -> int:
         json.dumps(
             {
                 "budget_ms": args.budget_ms,
+                "headroom": args.headroom,
+                "same_effective_budget": True,
                 "minutes": (time.time() - t0) / 60.0,
                 "static_baseline": {
                     "nprobe": static_entry.nprobe,
