@@ -2759,3 +2759,79 @@ arm. Any remaining difference is device state or nothing.
 workload the handset does not get hot enough for a temperature-level policy to
 act, and the thermal *slope* is the only device signal with anything to say.
 That bounds what C5 can claim on this device regardless of the re-run's outcome.
+
+---
+
+## ADR-0056 — C5 is NOT demonstrated: the thermal signal is real but not actionable
+
+**Status.** Accepted. 2026-09-06. `results/device/c5b_*`. Negative result.
+
+**The experiment.** `DeviceStatePolicy` against a tuned static baseline, on the
+handset, both arms selecting against the **same** effective budget (110 ms,
+headroom 1.0 — the fix from ADR-0055). Interleaved query by query, 22 minutes,
+27,985 queries, phone heating 31.5 → 36.5 °C under its own workload.
+
+### The result
+
+| arm | n | p95 | violations | recall | median nprobe |
+|---|---|---|---|---|---|
+| static | 13,993 | 94.50 ms | **1.8%** | 0.9054 | 8 |
+| adaptive | 13,992 | 94.04 ms | **1.8%** | 0.8762 | 8 |
+
+**Identical violation rates. The adaptive policy paid 0.029 recall and bought
+nothing.** The violation difference is −0.06 percentage points, which is noise.
+
+By the criterion this experiment declared in its own docstring before running —
+*"if the adaptive arm derates but its violation rate is no better than static's,
+device state is not carrying useful information and C5 fails"* — **C5 fails.**
+
+### The mechanism works; the signal does not
+
+This is not a broken policy. On the 901 queries (6.4%) where it actually
+derated, it did exactly what it was built to do:
+
+| on derated moments only | n | p95 | violations | recall |
+|---|---|---|---|---|
+| adaptive (derated to nprobe 4) | 901 | 43.15 ms | **0.0%** | 0.7993 |
+| static (same moments) | 885 | 77.56 ms | **0.8%** | 0.9104 |
+
+Derating halved p95 and eliminated violations *at those moments*. The policy is
+correct. **The problem is which moments it chose.**
+
+Static's violation rate on those same moments was 0.8% — *below* its 1.8%
+overall. The policy derated at times when the baseline was already doing better
+than usual. It reacted to a real signal that was not coupled to the outcome.
+
+### Why: temperature rose without ever throttling
+
+Every reason the policy cited across both runs was `temperature rising`, at
++0.05 to +0.13 °C/s. The absolute tiers — 42 °C warm, 46 °C hot (ADR-0049) —
+**never fired once**, because skin peaked at **36.5 °C**.
+
+That is the finding. On this handset and this workload, the phone warms
+measurably (5 °C over 22 minutes) but never approaches a temperature where the
+SoC throttles. So temperature rises, and latency does not respond to it. The
+thermal signal is **real, measurable, and not predictive of the thing the
+controller is trying to prevent.**
+
+### What this means for C5, stated precisely
+
+**C5 is not demonstrated, and it is not disproven either.** What is shown is
+narrower and more useful than either: *on a workload that does not drive the
+device into thermal throttling, device-state control has nothing to fix.* The
+policy correctly does nothing 93.6% of the time and its 6.4% of interventions
+are mistimed rather than wrong in kind.
+
+A fair test of C5 needs a workload that actually reaches throttling —
+sustained generation rather than retrieval, a hotter ambient, or a device under
+an external thermal load. That is a different experiment, not a longer one.
+
+### Why this is worth more than a marginal win
+
+Had the headroom confound (ADR-0055) gone unnoticed, this would have been
+written up as "C5 demonstrated: 0.0% violations against 1.8%". The counter that
+caught it — `adaptive_decisions_with_a_reason` — was added defensively, and
+between the two runs it converted a false positive into a precise negative.
+
+The honest claim is: **the machinery for C5 is built, tested, and works when it
+fires; the device never gave it a reason to fire that mattered.**
