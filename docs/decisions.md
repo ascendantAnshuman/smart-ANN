@@ -2630,3 +2630,69 @@ synthetic trace will reach for the same wrong shape.
 effort demonstrably drives power, but per-query attribution stays
 `reportable: false`. The machinery to produce it correctly now exists and is
 tested; what remains is 20 minutes of handset time.
+
+---
+
+## ADR-0054 — C4 demonstrated: per-query energy, measured rather than extrapolated
+
+**Status.** Accepted. 2026-09-06. `results/energy_model.json`, trace in
+`results/device/c4_*`.
+
+**What changed since ADR-0052.** Nothing about the estimator. The trace was
+duty-cycled (ADR-0053) so the baseline is *observed* instead of extrapolated,
+and the number that was unreportable is now reportable.
+
+9,670 queries over 21.0 minutes, **unplugged**, 218 samples, zero read
+failures, **60 idle intervals (27.6%)**, 14 clean work/idle alternations.
+
+### The result
+
+```
+power = 3.201e-03 W per cluster/s  +  0.7091 W baseline
+```
+
+| | value | 95% CI (10,000 bootstrap resamples) |
+|---|---|---|
+| marginal cost | **3.201 mJ per cluster** | [2.145, 4.201] — excludes zero |
+| fitted baseline | **0.7091 W** | [0.5957, 0.8385] — positive |
+| **directly measured idle** | **0.6571 W** | median of 60 observed idle intervals |
+
+**The fitted intercept and the directly measured idle power agree to within
+7.9%**, from the same data but by different routes — one a regression
+extrapolated to zero work, the other the median of intervals that actually sat
+at zero work. That agreement is the check the previous trace could not perform
+at all, and it is why the number is now reported.
+
+Compare with ADR-0052's attempt on the continuous trace: intercept **−0.209 W**,
+a phone consuming negative power. Same code, same estimator; the difference is
+entirely in the experiment.
+
+### The finding that changes how C4 should be read
+
+| | energy | share of all-in |
+|---|---|---|
+| all-in per query | 130.99 mJ | 100% |
+| retrieval @ nprobe=1 | 3.20 mJ | **2.4%** |
+| retrieval @ nprobe=8 | 25.61 mJ | **19.5%** |
+| retrieval @ nprobe=32 | 102.43 mJ | 78.2% |
+
+**The screen and radios are 65% of mean power.** Retrieval is a *minority* of
+what a query costs at any sane operating point — at the profile table's
+budget-fitting level it is about a fifth.
+
+That bounds C4 honestly. An energy-budget controller adjusting retrieval effort
+is moving roughly 20% of the total, not 100%, so the achievable saving is
+bounded by that share. The dial is real and its range is now known, which is
+more useful than a larger number that ignored the baseline. It also says
+something for the wider design: on a phone, retrieval effort is worth
+controlling, but the display is the bigger lever and no ANN parameter touches it.
+
+### What is still weak, stated plainly
+
+**R² = 0.165.** The relationship is genuinely noisy: uncontrolled background
+activity moves power between samples, and 218 samples over 21 minutes is not a
+lot. The slope's CI is a factor of two wide, [2.1, 4.2] mJ/cluster. What
+supports the estimate is not its R² but that it excludes zero, that its
+intercept is physical, and that the intercept is corroborated by direct
+measurement. A tighter number wants a longer trace with the screen off and
+flight mode on — which would also make it less representative of real use.
