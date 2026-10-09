@@ -1,0 +1,163 @@
+{
+  "query": "Why does my phone get hot even when it is not charging?",
+  "timestamp": "2026-10-08T17:58:05+0000",
+  "dataset": "demo_phone_care",
+  "index_root": "C:\\smartann-data\\index\\demo_phone_care\\7b1d10bbd6a0",
+  "generator": "google/flan-t5-base",
+  "resources": {
+    "battery_pct": 75.0,
+    "charging": false,
+    "temperature_c": 55.477,
+    "temperature_slope_c_per_s": NaN,
+    "cpu_util": NaN,
+    "mem_available_mb": NaN,
+    "source": "trace-replay",
+    "source_detail": "measured trace c5, sample 1/237 at t+0s, hottest sensor (the hottest thermal zone inside)",
+    "measured_on": "handset (recorded trace)",
+    "is_measured": true,
+    "not_measured_fields": [
+      "cpu_util",
+      "mem_available_mb"
+    ]
+  },
+  "controller": {
+    "policy": "device",
+    "chosen_nprobe": 3,
+    "k": 5,
+    "budget_ms": 12.0,
+    "baseline_nprobe": 11,
+    "derated": true,
+    "reason": "temperature 55.5C >= hot 46C -> cut effort: nprobe 11 -> 3, giving up 0.1780 measured recall",
+    "signals_used": [
+      "temperature 55.5C >= hot 46C"
+    ],
+    "decision_cost_us": 30.90000245720148,
+    "level_recall_measured_under": "THIS LAPTOP, not the handset: retrieval only, warm cache, 91 queries (10 paraphrases, 10 off-topic, every document title) x 5 interleaved repeats per level over the 255-chunk demo corpus in 16 clusters, recall at k=10 to match the handset table and the 12.4 stress test. Device latencies live in results/device_profile_table.json and are for SQuAD. TAKEN ON A BUSY MACHINE (--allow-busy): the latencies here are not quotable.",
+    "level_recall": 0.8153846153846154,
+    "level_p95_ms": 3.440150001551956,
+    "recall_given_up_vs_baseline": 0.17802197802197806,
+    "note": "level_recall describes this EFFORT LEVEL over the evaluation set, not this query. A typed question has no ground truth to score against."
+  },
+  "retrieval": {
+    "clusters_probed": 3,
+    "vectors_scanned": 81,
+    "chunks": [
+      {
+        "rank": 1,
+        "chunk_id": 0,
+        "doc_id": "heat-basics-work-makes-heat",
+        "title": "Why a phone gets warm even when it is not plugged in",
+        "score": 0.934930682182312,
+        "store": "phone-care demo corpus",
+        "chars": 385
+      },
+      {
+        "rank": 2,
+        "chunk_id": 140,
+        "doc_id": "heat-what-charging-adds",
+        "title": "What charging adds, and why a phone can be hot without it",
+        "score": 0.9323161840438843,
+        "store": "phone-care demo corpus",
+        "chars": 365
+      },
+      {
+        "rank": 3,
+        "chunk_id": 1,
+        "doc_id": "heat-basics-work-makes-heat",
+        "title": "Why a phone gets warm even when it is not plugged in",
+        "score": 0.9096270203590393,
+        "store": "phone-care demo corpus",
+        "chars": 436
+      },
+      {
+        "rank": 4,
+        "chunk_id": 133,
+        "doc_id": "heat-battery-chemistry-limits",
+        "title": "Why lithium-ion batteries dislike heat",
+        "score": 0.9080078601837158,
+        "store": "phone-care demo corpus",
+        "chars": 326
+      },
+      {
+        "rank": 5,
+        "chunk_id": 138,
+        "doc_id": "heat-what-charging-adds",
+        "title": "What charging adds, and why a phone can be hot without it",
+        "score": 0.907292366027832,
+        "store": "phone-care demo corpus",
+        "chars": 521
+      }
+    ],
+    "best_score": 0.934930682182312
+  },
+  "latency_ms": {
+    "stages": [
+      {
+        "stage": "embed",
+        "ms": 0.3357999958097935,
+        "detail": "thenlper/gte-small, cache hit"
+      },
+      {
+        "stage": "probe",
+        "ms": 0.4557000065688044,
+        "detail": "16 centroids, gap 0.020"
+      },
+      {
+        "stage": "search",
+        "ms": 6.327900002361275,
+        "detail": "nprobe=3, 3 cluster loads"
+      },
+      {
+        "stage": "reduce",
+        "ms": 0.003200009814463556,
+        "detail": "passthrough (SCR off)"
+      },
+      {
+        "stage": "generate",
+        "ms": 1774.0088999998989,
+        "detail": "533 prompt tokens"
+      },
+      {
+        "stage": "verify",
+        "ms": 624.0364999976009,
+        "detail": "p(contains answer) = 0.51"
+      }
+    ],
+    "total": 2405.168000012054
+  },
+  "energy": {
+    "mj": 9.618780653511436,
+    "label": "estimate",
+    "method": "3 cluster loads x 3.206 mJ per cluster. The cluster count is measured on this run; the coefficient is the handset's, so this is what the PHONE would spend on this retrieval.",
+    "coefficient_source": "measured: device power regressed on cluster-access rate over the Phase 3.5 energy trace (results/energy_model.json), r2 = 0.165 -- a weak fit, so treat this as an order of magnitude rather than a figure",
+    "covers": "retrieval only: opening and scanning clusters",
+    "excludes": "embedding and generation. No energy sensor exists on this machine (ADR-0007/0008) and the phone traces never isolated the generator, so there is no measurement to base them on and none is invented."
+  },
+  "answer": {
+    "text": "None of this is required for a phone to get hot. Almost all of the electrical energy a phone draws from its battery ends up as heat,",
+    "declined": false,
+    "cited_chunk_ids": [],
+    "context_chars": 2033,
+    "prompt_tokens": 533,
+    "generated_tokens": 33,
+    "truncated": false
+  },
+  "grounding": {
+    "grounded": true,
+    "best_score": 0.934930682182312,
+    "threshold": 0.8263489902019501,
+    "margin": 0.10858169198036194,
+    "reason": "best passage scored 0.935, at or above the 0.826 threshold -> answer from the corpus"
+  },
+  "cache": {
+    "hit": false,
+    "ran": false,
+    "note": "the semantic cache was not enabled"
+  },
+  "network": {
+    "bytes_sent": 0,
+    "connections_opened": 0,
+    "sent_nothing": true,
+    "how_measured": "this process's own socket sends, counted across the query. Not a machine-wide counter, which would include other applications."
+  }
+}
