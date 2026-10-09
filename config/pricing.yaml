@@ -1,0 +1,36 @@
+# Cloud API pricing, for the Phase 13 comparison.
+#
+# NOTHING HERE IS FILLED IN, AND NOTHING WILL BE GUESSED.
+#
+# scripts/phase13_comparison.py reads this file. While the prices below are
+# null it reports the cloud cost column as "not computed" and says why. It will
+# not substitute a plausible figure: a price that looks right but was invented
+# is exactly the kind of number this project refuses to print.
+#
+# To fill it in, visit the provider's published pricing page, copy the two
+# per-token prices for the model you intend to compare against, and record the
+# URL and the date you read it. The date matters because these prices change,
+# and a result quoted a year later should carry the date of the price it used.
+#
+# Prices are per 1,000,000 tokens, in US dollars, which is how providers
+# currently publish them. If a provider publishes per 1,000 tokens instead,
+# multiply by 1000 before entering it here.
+
+model: null                 # e.g. "gpt-4o-mini" -- the exact model id you priced
+input_per_1m_usd: null      # price per 1M input (prompt) tokens, USD
+output_per_1m_usd: null     # price per 1M output (completion) tokens, USD
+source_url: null            # the pricing page you read these from
+retrieved_on: null          # the date you read it, as YYYY-MM-DD
+currency: USD
+notes: null                 # anything else worth recording, e.g. a tier or discount
+
+# Example of a COMPLETED file, shown so the shape is unambiguous. These numbers
+# are deliberately not real and must not be copied:
+#
+#   model: some-model-name
+#   input_per_1m_usd: 0.00
+#   output_per_1m_usd: 0.00
+#   source_url: https://provider.example/pricing
+#   retrieved_on: 2026-01-01
+#   currency: USD
+#   notes: standard tier, no volume discount
