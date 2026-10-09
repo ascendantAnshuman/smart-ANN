@@ -1,0 +1,148 @@
+{
+  "about": "Hand-labelled evaluation queries for the Phase 11 demonstration corpus. Labels were assigned by reading the documents, before any retrieval was run against them.",
+  "relevance_model": {
+    "gold_primary": "Documents that answer the general question 'why is my phone hot while it is not charging' directly and on their own. recall@5 is measured against this set.",
+    "gold_relevant": "gold_primary plus every document describing a specific cause of heat. A passage from any of these is a correct and useful retrieval for a heating question, so these count towards relevant@5 but not towards recall@5.",
+    "why_two_sets": "47 of the 71 documents touch heat in some way. Scoring recall against all of them would make almost any retrieval look perfect, which measures nothing. The primary set is small and specific, so a miss is visible.",
+    "not_gold_though_heat_related": [
+      "heat-thermal-throttling, heat-what-is-normal, heat-skin-versus-inside, heat-how-phones-shed-heat, heat-bluetooth-and-wearables: mechanism and judgement, not causes",
+      "heat-what-to-do-immediate, heat-what-to-do-settings, heat-myths, heat-airplane-mode-and-radios, heat-measuring-your-own-phone: remedies and diagnosis, asked by a different question",
+      "heat-dangerous-swelling, heat-dangerous-signs, heat-battery-chemistry-limits: safety and chemistry, asked by a different question"
+    ],
+    "gold_primary_frozen": "The primary set as it stood for the 36-document corpus, which measured recall@5 0.450. Frozen so that a later corpus revision is comparable with it.",
+    "gold_primary_extended": "The frozen set plus heat-inside-where-it-comes-from, added in the expansion, which also answers the general question on its own. Retrieving it is a correct result, so scoring it as a miss would understate. Both numbers are reported."
+  },
+  "gold_primary": [
+    "heat-basics-work-makes-heat",
+    "heat-multiple-causes"
+  ],
+  "gold_relevant": [
+    "heat-5g-and-mobile-data",
+    "heat-after-software-update",
+    "heat-aging-battery",
+    "heat-ar-and-face-filters",
+    "heat-background-apps-and-sync",
+    "heat-basics-work-makes-heat",
+    "heat-battery-feedback-loop",
+    "heat-big-and-small-cores",
+    "heat-camera-and-photo-processing",
+    "heat-cases-trap-heat",
+    "heat-downloads-and-updates",
+    "heat-gaming-and-gpu",
+    "heat-gps-and-navigation",
+    "heat-hot-environment-and-sun",
+    "heat-hotspot-and-tethering",
+    "heat-humidity-and-altitude",
+    "heat-in-cars",
+    "heat-inside-where-it-comes-from",
+    "heat-malware-and-mining",
+    "heat-multiple-causes",
+    "heat-older-phones-newer-software",
+    "heat-on-device-ai",
+    "heat-pockets-bags-and-bedding",
+    "heat-runaway-apps",
+    "heat-screen-brightness",
+    "heat-social-feeds-and-autoplay",
+    "heat-storage-and-encryption",
+    "heat-video-calls",
+    "heat-video-playback-streaming",
+    "heat-video-recording",
+    "heat-voice-assistants",
+    "heat-weak-signal-modem",
+    "heat-what-charging-adds",
+    "heat-wifi-versus-mobile-data"
+  ],
+  "paraphrases": [
+    "Why does my phone get hot even when it's not charging?",
+    "My phone heats up when it isn't plugged in. What causes that?",
+    "Why is my mobile warm even though I am not charging it?",
+    "Phone getting hot without a charger, what is the reason?",
+    "What makes a smartphone heat up when it is unplugged?",
+    "My handset becomes hot while running on battery power. Why?",
+    "Why would a phone be warm if it is not connected to a charger?",
+    "What are the reasons a phone gets hot when it is not on charge?",
+    "My phone is hot to the touch and it is not charging. Why is that?",
+    "What causes heat in a phone that is not being charged?"
+  ],
+  "off_topic": [
+    {
+      "query": "How do I free up storage space on my phone?",
+      "kind": "off_topic_in_corpus",
+      "gold": [
+        "distract-storage-space"
+      ],
+      "note": "The corpus can answer this. The right behaviour is to retrieve the storage document, not to refuse."
+    },
+    {
+      "query": "How do I pair Bluetooth headphones with my phone?",
+      "kind": "off_topic_in_corpus",
+      "gold": [
+        "distract-bluetooth-pairing"
+      ],
+      "note": "Answerable from a distractor document."
+    },
+    {
+      "query": "Which screen protector should I buy for my phone?",
+      "kind": "off_topic_in_corpus",
+      "gold": [
+        "distract-screen-protectors"
+      ],
+      "note": "Answerable. Note the near-miss with heat-cases-trap-heat, which is also about things stuck to the outside of a phone."
+    },
+    {
+      "query": "How many megapixels do I actually need in a phone camera?",
+      "kind": "off_topic_in_corpus",
+      "gold": [
+        "distract-megapixels"
+      ],
+      "note": "Near-miss with heat-camera-and-photo-processing, which is also about the camera."
+    },
+    {
+      "query": "How do I transfer my photos to a laptop?",
+      "kind": "off_topic_in_corpus",
+      "gold": [
+        "distract-transfer-photos"
+      ],
+      "note": "Answerable from a distractor document."
+    },
+    {
+      "query": "What is the capital city of France?",
+      "kind": "out_of_corpus",
+      "gold": [],
+      "note": "Nothing in this corpus is relevant. The honest answer is that it is not in the knowledge base."
+    },
+    {
+      "query": "How do I bake sourdough bread at home?",
+      "kind": "out_of_corpus",
+      "gold": [],
+      "note": "Nothing relevant."
+    },
+    {
+      "query": "What is the offside rule in football?",
+      "kind": "out_of_corpus",
+      "gold": [],
+      "note": "Nothing relevant."
+    },
+    {
+      "query": "Who wrote the play Hamlet?",
+      "kind": "out_of_corpus",
+      "gold": [],
+      "note": "Nothing relevant."
+    },
+    {
+      "query": "What is the boiling point of water at sea level?",
+      "kind": "out_of_corpus",
+      "gold": [],
+      "note": "Nothing relevant. Deliberately mentions temperature, so a retriever matching on the word 'heat' alone will score it higher than it deserves."
+    }
+  ],
+  "gold_primary_frozen": [
+    "heat-basics-work-makes-heat",
+    "heat-multiple-causes"
+  ],
+  "gold_primary_extended": [
+    "heat-basics-work-makes-heat",
+    "heat-inside-where-it-comes-from",
+    "heat-multiple-causes"
+  ]
+}

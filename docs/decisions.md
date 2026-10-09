@@ -2901,3 +2901,179 @@ path, used the same stale default, or accepted the same ambiguous code.
 `docs/UNDERSTANDING.md` is added partly for this reason: it documents what each
 number *should* look like, so a reader comparing their terminal against it has
 something concrete to disagree with.
+
+---
+
+## ADR-0058 — C6: effort allocated by query difficulty, a signal that was computed and discarded
+
+**Status.** Accepted. 2026-09-23. `results/phase9/query_adaptive.json`, measurement
+cached in `results/phase9/measurement.npz`.
+
+**The defect this started as.** `EcoVectorIndex.probe` has always computed three
+query-difficulty features — `centroid_top1_dist`, `centroid_dist_gap`,
+`centroid_dist_entropy` — and `ControllerState` has always carried them into
+every policy decision. A grep of all five policies' `decide` methods found that
+**none of them read any of the three**. The architecture diagram in the README
+shows a "difficulty signal" arrow feeding the controller. That arrow was not
+connected to anything.
+
+So every query at a given budget received identical effort: the uniform
+allocation this project exists to argue against, on the one axis where the
+information was already free and already paid for.
+
+### The signal separates, and by a lot
+
+Recall@10 on 1,000 SQuAD queries, bucketed into difficulty quintiles by measured
+gap:
+
+| gap quintile | gap range | n=1 | n=4 | n=8 | n=16 | n=32 |
+|---|---|---|---|---|---|---|
+| 1 (hardest) | 0.0000 – 0.0041 | **0.2780** | 0.6810 | 0.7960 | 0.8890 | 0.9560 |
+| 2 | 0.0041 – 0.0084 | 0.3830 | 0.7200 | 0.8310 | 0.9120 | 0.9630 |
+| 3 | 0.0084 – 0.0176 | 0.5600 | 0.7910 | 0.8740 | 0.9380 | 0.9690 |
+| 4 | 0.0179 – 0.0328 | 0.8360 | 0.9270 | 0.9630 | 0.9760 | 0.9900 |
+| 5 (easiest) | 0.0328 – 0.0848 | **0.9780** | 0.9870 | 0.9940 | 0.9970 | 0.9990 |
+
+A 3.5x spread in recall at the cheapest level, between queries the probe can
+tell apart before opening a single cluster.
+
+### The result
+
+Allocation fitted on 500 queries, scored on the 500 it never saw. Costs are the
+handset's measured p95 per level, not timed on the laptop.
+
+| budget | uniform | adaptive | delta | device ms |
+|---|---|---|---|---|
+| nprobe 1 | 0.6022 | 0.6022 | +0.0000 | 13.8 → 13.8 |
+| nprobe 4 | 0.8212 | **0.8304** | +0.0092 | 52.3 → 49.9 |
+| nprobe 8 | 0.8952 | **0.9114** | +0.0162 | 101.5 → 104.3 |
+| nprobe 16 | 0.9472 | **0.9562** | +0.0090 | 189.8 → 196.3 |
+| nprobe 32 | 0.9764 | 0.9758 | −0.0006 | 354.1 → 322.9 |
+
+**C6 is SUPPORTED.** Three of five budgets improve. One held-out query gaining
+one neighbour moves mean recall by 0.0002, so +0.0162 is roughly 81
+query-neighbours — two orders of magnitude above the resolution floor.
+
+Nothing improves at nprobe=1 because every bucket is already at the cheapest
+level; there is no effort to move. Nothing improves at nprobe=32 because every
+bucket is near ceiling.
+
+### What this result is not
+
+**It is not "at exactly equal cost".** The allocation is constrained to the
+budget on the fit half. The held-out half's difficulty mix differs, so realised
+cost drifts — by up to **3.4%** over the uniform arm at nprobe=8, the budget with
+the largest recall gain. The recorded verdict string says this, and the
+comparison should be read as near-equal cost. A reader entitled to be suspicious
+of +1.8% recall bought with +2.8% time should note that climbing the uniform
+curve from nprobe 8 to 16 costs +87% time for +5.2% recall, so the allocation is
+still far off that trade — but the honest framing is a favourable exchange rate,
+not a free lunch.
+
+**It is not a device measurement.** Recall is a property of the index and the
+query, so it is measured on the laptop and transfers unchanged. Latency is not,
+so no latency here was timed locally.
+
+### Two documentation defects this exposed
+
+`types.py` had described `centroid_dist_gap` as **`d2/d1`**, a ratio, since the
+field was introduced. `EcoVectorIndex.probe` actually computes **`d2 - d1`**, a
+difference, and its own comment explains why: a ratio divides by a distance that
+can be zero or negative for duplicate vectors (the same float32 boundary as
+ADR-0019). The measured values are 0.000–0.08, which a reader trusting the type
+comment would have parsed as ratios near zero and concluded the opposite about
+which queries were hard.
+
+The first draft of this experiment's verdict logic called the result
+**SUPPORTED** on the strength of 1 win in 5 — the distribution of noise. It now
+requires a majority of budgets to improve by more than three times the
+resolution floor, and reports a cost saving as a separate, weaker claim.
+
+### Where it sits relative to C5
+
+C5 failed because the platform does not expose the signal the policy needs. C6
+succeeds because the signal it needs is one the retrieval path computes for
+itself, for free, and had been throwing away.
+
+---
+
+## ADR-0032 (amendment) — a reversal count cannot tell a sawtooth from a collapse
+
+**Status.** Accepted. Amends the stability criterion, not the rule. ADR-0032's
+rule — pace control actions no faster than the feedback delay — stands and is
+confirmed a second time below, on different hardware's measurements.
+
+**What was re-tested and why.** ADR-0032 was confirmed on the laptop at
+`control_period_s = 4.05`, which is 50 samples × the laptop's quiet latency at
+the top effort level. The handset is ~20× slower per query at that level, so its
+50-sample window takes ~20× longer to fill and the laptop's period is not
+transferable. Phase 11.1 re-derived the period from the Phase 3.5 handset trace's
+own measurements — 50 × measured p50 at nprobe=32 (169.21 ms) = **8.46 s** — and
+replayed the shipping `AimdPolicy` against measured handset latency.
+
+**The rule holds.** Three arms, all reported:
+
+```
+control period     median nprobe   at floor   nprobe p5-p95   reversals/min   p95      over target
+0 s (ADR-0032's)         1          59.2%      1-29  (90%)        39.42      152.3 ms     5.0%
+4.05 s (laptop's)       11           0.0%      7-16  (29%)         3.81      127.5 ms     1.6%
+8.46 s (this trace's)   11           0.0%      7-16  (29%)         1.96      125.7 ms     1.5%
+```
+
+The unpaced arm reproduces the ratchet on handset-measured feedback, pinned to
+its floor for 59% of queries. Both paced arms hold `nprobe=11` and never reach
+the floor, and pacing to the trace's own fill time halves the reversal rate.
+
+**The criterion was wrong, and it was wrong in a way worth recording.** Phase
+11.1 pre-declared "≤ 1.0 direction reversals per minute". The paced arm measured
+1.96 and failed it. The criterion is the defect: **AIMD reverses direction once
+per tooth by construction**, so a reversal count penalises the mechanism rather
+than the pathology. The decisive case is that a controller pinned to its floor
+reverses direction *never* — it scores 0.00 reversals/min, a perfect result on
+the declared criterion, while being the exact failure ADR-0032 exists to
+prevent. `tests/test_controller_check.py` asserts that case directly, so the
+trap cannot be re-entered silently.
+
+**The amended criterion is amplitude, and the floor check that was already there.**
+
+* the swing between the 5th and 95th percentile of `nprobe`, as a fraction of
+  the action range: **≤ 0.5**, against the ratchet's 0.90 and the paced arms' 0.29
+* median `nprobe` strictly above `nprobe_min` — unchanged; it is what catches
+  the collapse that a reversal count misses
+* the p95 the loop actually delivers must be at or under the target it controls
+  to: **125.7 ms and 127.5 ms** for the paced arms against a 152.18 ms target,
+  while the ratcheting arm delivers **152.3 ms** and misses its own target — it
+  gave up half its recall and still did not buy the latency it cut for
+
+Amplitude is the right quantity because it is what separates a loop oscillating
+*around* an operating point from one travelling the whole action space: the
+paced arms move within 29% of the range around a stable median, the unpaced arm
+covers 90% of it with no median worth the name.
+
+**Both criteria are reported, and the declared one is reported as failed.**
+`results/controller_check.json` carries both verdicts. The pre-declaration in
+`docs/predeclared/phase11_controller_check.json` is left exactly as written. A
+criterion amended after seeing the result is only honest if the original and its
+outcome stay visible beside the amendment, which is the whole point of writing
+it down first.
+
+### A second-order finding: on this trace, latency and temperature disagree in sign
+
+AIMD reads p95 latency and nothing else. During the hottest stretch of the
+Phase 3.5 trace the device ran **faster**, not slower:
+
+```
+window          hottest zone        p50 @ nprobe=8    p95 @ nprobe=8
+t=300-600 s     48.9 C mean           46.0 ms           104.5 ms
+t=900-1100 s    54.9 C mean, 69.6 peak 37.9 ms            59.3 ms
+```
+
+So the latency-governed controller **raised** retrieval depth to nprobe 25–26
+while the hottest zone climbed toward 70 °C. Latency is not a proxy for thermal
+state on this device: sustained load brings the clocks up, and the heat is the
+consequence of the faster execution rather than a brake on it.
+
+This is why the demonstration's device-state story is driven by
+`DeviceStatePolicy`, which reads the thermometer, and AIMD is kept for the
+latency comparison it was built for. A demo that showed a thermal story through
+a policy that cannot see temperature would be showing a coincidence.

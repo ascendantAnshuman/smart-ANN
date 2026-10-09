@@ -1,0 +1,30 @@
+{
+  "written_before_execution": true,
+  "test_id": "E_PHASE11_controller_check",
+  "status_at_declaration": "not yet run",
+
+  "question": "With the control period set to the observation window's fill time, is the AIMD loop stable when its feedback comes from MEASURED handset latency rather than from laptop latency? ADR-0032 was confirmed on the laptop (control_period_s = 4.05 s). The Phase 3.5 handset trace is 20x slower per query at the top effort level, so the window's fill time there is a different number, and the laptop's value is not transferable.",
+
+  "setting_derivation": {
+    "control_period_s": "50 samples x the trace's own measured p50 latency at nprobe=32 (the controller's nprobe_max), computed from results/device/trace_queries.jsonl at run time. Not searched, not carried over from the laptop.",
+    "latency_target_ms": "1.5 x the measured p95 of the MEDIAN swept level (nprobe=8) in the same trace -- the identical rule scripts/experiment_contention.py already uses to set its target.",
+    "arms": "three control periods, all three reported: 0.0 (the configuration ADR-0032 recorded as collapsing, kept as the control), 4.05 (the laptop's pre-declared value), and the trace-derived fill time. Reporting all three is what makes this a test of a derived value rather than a search for a working one."
+  },
+
+  "stability_criterion_declared_in_advance": {
+    "direction_reversals_per_min": "<= 1.0",
+    "no_collapse": "median nprobe over the run must be > nprobe_min (1); a controller sitting on its floor is not a stable controller, it is a dead one",
+    "both_must_hold": true
+  },
+
+  "outcomes_declared_in_advance": {
+    "stable": "the trace-derived arm meets both conditions -> the loop is sound on handset-measured feedback; Phase 11.2 onwards may proceed",
+    "unstable": "either condition fails -> STOP. Report it as a negative result and do not retune. The demo depends on this loop, and a demo built on an oscillating controller would be showing a defect as a feature.",
+    "commitment": "The outcome is reported whichever it is, for all three arms."
+  },
+
+  "what_this_is_not": {
+    "not_end_to_end_measured": "This is a trace-replay closed loop, not a live run on the phone. The latencies fed back are measurements from the Phase 3.5 trace; the controller and the clock are real; the pairing of a decision with a latency recorded at the same moment at that effort level is the replay's construction. Labelled trace-replay everywhere it is reported.",
+    "temperature_is_a_spectator": "AIMD reads p95 latency. It does not read temperature. The temperature curve is plotted because it is the device's real condition during the same trace, NOT because this controller responds to it. DeviceStatePolicy is the policy that reads the thermometer."
+  }
+}

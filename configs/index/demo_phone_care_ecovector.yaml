@@ -1,0 +1,22 @@
+# The Phase 11 demonstration corpus: 71 authored documents on why a phone gets
+# hot, indexed exactly like the SQuAD benchmark so the demo and the measured
+# results come from one code path.
+#
+# nc is explicit rather than "auto" because this dataset is not in the registry
+# (it is authored in-repo, not downloaded, so it has no checksum to verify and
+# nothing for `data prepare` to do). 16 is what the registry's own auto rule
+# produces for it: round(sqrt(255 chunks)), about 16 chunks per cluster.
+#
+# It was 11 while the corpus held 36 documents. Changing it changes the config
+# hash, so the new index lands in its own directory and the old one is still
+# addressable -- which is the whole point of hashing the build parameters.
+#
+# min_graph_size is left at its default, which makes every cluster flat and
+# mmap-read -- the regime ADR-0028 settled on and the one every other index in
+# this project is built under.
+dataset: demo_phone_care
+nc: 16
+m: 32
+ef_construction: 200
+seed: 42
+index_variant: ecovector
