@@ -29,3 +29,9 @@ desktop.ini
 #   chrome --headless=new --no-pdf-header-footer --print-to-pdf=... file:///...
 # The source is committed; the 971 KB binary is not.
 docs/*.pdf
+
+# Local datasets (802 MB of vector corpora) -- fetch with scripts, never commit.
+datasets/
+
+# Slide decks are built from the docs sources, same rule as the PDFs.
+docs/*.pptx

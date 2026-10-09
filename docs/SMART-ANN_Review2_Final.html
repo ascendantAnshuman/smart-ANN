@@ -1,0 +1,1050 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SMART-ANN Review 2</title>
+<style>
+@page { size: 13.333in 7.5in; margin: 0; }
+
+:root{
+  --blue:#4472C4;          /* table header, template accent */
+  --blue-dark:#1F3864;     /* title / heading blue */
+  --blue-mid:#2E5496;
+  --row-a:#D9E2F3;
+  --row-b:#EDF1F9;
+  --ink:#000000;
+  --grey:#595959;
+  --grey-soft:#7F7F7F;
+  --red:#C00000;
+  --green:#1F6B3A;
+  --rule:#BFBFBF;
+  --serif:"Times New Roman", Times, Georgia, serif;
+  --sans:Calibri, "Segoe UI", Arial, sans-serif;
+}
+
+*{ box-sizing:border-box; }
+
+body{
+  margin:0;
+  background:#FFFFFF;
+  color:var(--ink);
+  font-family:var(--serif);
+  -webkit-print-color-adjust:exact;
+  print-color-adjust:exact;
+}
+
+.slide{
+  position:relative;
+  width:1280px;
+  height:720px;
+  padding:38px 54px 46px;
+  background:#FFFFFF;
+  overflow:hidden;
+  page-break-after:always;
+  break-after:page;
+}
+.slide:last-child{ page-break-after:auto; break-after:auto; }
+
+/* ---------- headings ---------- */
+h1.slide-title{
+  font-family:var(--serif);
+  font-size:33px;
+  font-weight:700;
+  margin:0 0 20px;
+  letter-spacing:-0.005em;
+}
+h1.slide-title .sub{
+  font-size:22px;
+  font-weight:700;
+  color:var(--grey);
+}
+
+/* ---------- footer ---------- */
+.footer{
+  position:absolute;
+  left:54px; right:54px; bottom:16px;
+  display:flex;
+  justify-content:space-between;
+  font-family:var(--sans);
+  font-size:11px;
+  color:var(--grey-soft);
+}
+.footer .mid{ letter-spacing:0.02em; }
+
+/* ---------- body text ---------- */
+p{ margin:0 0 12px; font-size:17px; line-height:1.43; }
+.lead{ font-size:18.5px; }
+ul{ margin:0 0 10px; padding-left:22px; }
+li{ font-size:17px; line-height:1.43; margin:0 0 10px; }
+li.tight{ margin:0 0 7px; }
+.sub-note{
+  font-size:15px;
+  line-height:1.42;
+  color:#333;
+  margin:0 0 11px 22px;
+}
+b, strong{ font-weight:700; }
+.red{ color:var(--red); }
+.green{ color:var(--green); }
+.blue{ color:var(--blue-dark); }
+.note{
+  font-family:var(--serif);
+  font-style:italic;
+  font-size:14.5px;
+  color:var(--red);
+}
+.caption{
+  font-family:var(--serif);
+  font-style:italic;
+  font-size:14.5px;
+  color:var(--blue-dark);
+}
+.defn{ font-size:15px; line-height:1.42; color:#333; }
+
+/* ---------- tables ---------- */
+table{
+  border-collapse:collapse;
+  width:100%;
+  font-family:var(--sans);
+  table-layout:fixed;
+}
+th{
+  background:var(--blue);
+  color:#FFFFFF;
+  font-weight:700;
+  text-align:left;
+  padding:8px 9px;
+  font-size:13.5px;
+  border:1px solid #FFFFFF;
+  vertical-align:middle;
+}
+td{
+  padding:7px 9px;
+  font-size:13.5px;
+  line-height:1.34;
+  vertical-align:top;
+  border:1px solid #FFFFFF;
+}
+tbody tr:nth-child(odd) td{ background:var(--row-a); }
+tbody tr:nth-child(even) td{ background:var(--row-b); }
+td.n{ font-variant-numeric:tabular-nums; white-space:nowrap; }
+.tbl-tight td{ font-size:12.8px; padding:6px 8px; }
+.tbl-tight th{ font-size:13px; padding:7px 8px; }
+
+.two-col{ display:flex; gap:18px; align-items:flex-start; }
+.two-col > *{ min-width:0; }
+
+/* ---------- cover ---------- */
+.cover{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-start;
+  text-align:center;
+  height:100%;
+  padding-top:34px;
+}
+.cover .course{
+  font-size:21px;
+  font-weight:700;
+  margin-bottom:36px;
+}
+.cover .title{
+  font-size:33px;
+  font-weight:700;
+  color:var(--blue-dark);
+  line-height:1.32;
+  max-width:1000px;
+  margin-bottom:42px;
+}
+.cover .block{
+  text-align:left;
+  width:560px;
+  font-size:17px;
+  line-height:1.62;
+}
+.cover .block .lbl{ font-weight:400; }
+.cover .block .nm{ font-weight:700; }
+.cover .block .reg{ font-weight:700; display:inline-block; margin-left:8px; }
+.cover .inst{
+  margin-top:auto;
+  padding-bottom:8px;
+  font-size:19px;
+  font-weight:700;
+  color:var(--blue-dark);
+  line-height:1.4;
+}
+.cover .inst .small{
+  display:block;
+  font-size:12.5px;
+  font-weight:400;
+  color:var(--ink);
+}
+.cover .inst .school{
+  display:block;
+  font-size:14px;
+  font-weight:400;
+  color:var(--ink);
+}
+
+/* ---------- approval ---------- */
+.approval-box{
+  border:1px solid var(--rule);
+  background:#FAFAFA;
+  padding:20px 26px;
+  margin:14px 0 0 26px;
+  width:820px;
+  font-family:var(--sans);
+}
+.approval-box .hd{
+  font-size:17.5px;
+  font-weight:700;
+  margin-bottom:12px;
+}
+.approval-box ul{ padding-left:20px; margin:0 0 12px; }
+.approval-box li{ font-family:var(--sans); font-size:15.5px; margin:0 0 7px; }
+.fillin{
+  display:inline-block;
+  min-width:112px;
+  border-bottom:1px solid var(--ink);
+  text-align:center;
+  font-weight:400;
+  color:var(--grey);
+}
+
+/* ---------- architecture diagram ---------- */
+.band-label{
+  font-family:var(--sans);
+  font-size:11.5px;
+  font-weight:700;
+  letter-spacing:0.06em;
+  color:var(--grey);
+  margin:0 0 5px;
+}
+.band-label.ctrl{ color:var(--red); }
+.band-label.tele{ color:var(--blue-mid); }
+.row{ display:flex; align-items:stretch; gap:5px; margin-bottom:12px; }
+.box{
+  flex:1 1 0;
+  border:1.4px solid #808080;
+  border-radius:4px;
+  background:#FFFFFF;
+  padding:8px 5px;
+  text-align:center;
+  font-family:var(--sans);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+.box .t{ font-size:12.8px; font-weight:700; line-height:1.2; }
+.box .d{ font-size:10.8px; color:#404040; line-height:1.24; margin-top:3px; }
+.box.q{ border-color:var(--blue); background:#EDF1F9; }
+.box.ctrl{ border-color:var(--red); background:#FBEEEE; }
+.box.tele{ border-color:var(--blue-mid); background:#EDF1F9; }
+.box.store{ border-color:#909090; background:#F2F2F2; }
+.box.out{ border-color:var(--green); background:#E9F2EC; }
+.arrow{
+  align-self:center;
+  font-family:var(--sans);
+  font-size:15px;
+  color:#606060;
+  flex:0 0 12px;
+  text-align:center;
+}
+.uplink{
+  display:flex;
+  justify-content:center;
+  font-family:var(--sans);
+  font-size:12px;
+  color:var(--red);
+  margin:-6px 0 3px;
+}
+.uplink .lab{
+  font-size:10.5px;
+  font-weight:700;
+  letter-spacing:0.04em;
+  padding-left:6px;
+}
+
+/* ---------- objectives grid ---------- */
+.obj-foot{
+  display:flex;
+  gap:26px;
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px solid var(--rule);
+}
+.obj-foot > div{ flex:1 1 0; }
+.obj-foot .hd{
+  font-family:var(--sans);
+  font-size:13.5px;
+  font-weight:700;
+  margin-bottom:5px;
+}
+.obj-foot .bd{ font-size:13.5px; line-height:1.4; }
+
+/* ---------- references ---------- */
+.refs{ font-size:14.6px; line-height:1.45; }
+.refs p{ margin:0 0 9.5px; font-size:14.6px; text-indent:-26px; padding-left:26px; }
+
+/* ---------- per-slide fill adjustments ---------- */
+.slide.airy p{ font-size:18px; margin:0 0 19px; }
+.slide.airy .lead{ font-size:19.5px; }
+.slide.airy li{ font-size:18px; margin:0 0 13px; }
+.slide.airy li.tight{ margin:0 0 11px; }
+.slide.airy .sub-note{ font-size:16px; margin:0 0 19px 22px; }
+.slide.airy .caption{ font-size:15.5px; }
+
+.slide.roomy table td{ padding:11px 9px; font-size:14px; }
+.slide.roomy table th{ padding:10px 9px; font-size:14px; }
+.slide.roomy .tbl-tight td{ padding:9.5px 8px; font-size:13.3px; }
+.slide.roomy .tbl-tight th{ padding:9px 8px; font-size:13.5px; }
+.slide.roomy .caption{ font-size:15.5px; }
+
+.slide.arch .row{ margin-bottom:16px; }
+.slide.arch .box{ padding:11px 5px; }
+.slide.arch .box .t{ font-size:13.4px; }
+.slide.arch .box .d{ font-size:11.3px; }
+.slide.arch .band-label{ font-size:12.3px; margin:0 0 6px; }
+.slide.arch .caption{ font-size:15.5px; }
+
+.slide.approve .approval-box{ padding:26px 30px; margin-top:22px; }
+.slide.approve p{ font-size:18px; }
+</style>
+</head>
+<body>
+
+<!-- =========================== 1. COVER =========================== -->
+<section class="slide">
+  <div class="cover">
+    <div class="course">B.Tech &nbsp;|&nbsp; BCSE497J – Project-I</div>
+
+    <div class="title">
+      SMART-ANN: Runtime Resource-Aware Adaptive Control<br>
+      for On-Device Retrieval-Augmented Generation
+    </div>
+
+    <div class="block">
+      <div class="lbl">Team members:</div>
+      <div>• <span class="nm">ANSHUMAN KUMAR</span> <span class="reg">(23BCE0311)</span></div>
+      <div>• <span class="nm">SHIVAM KUMAR</span> <span class="reg">(23BCI0210)</span></div>
+      <div>• <span class="nm">GOVIND MUKUND AGRAWAL</span> <span class="reg">(23BCT230)</span></div>
+      <div style="height:14px"></div>
+      <div class="lbl">Faculty guide :&nbsp; <span class="nm">SUGANTHINI C</span></div>
+    </div>
+
+    <div class="inst">
+      Vellore Institute of Technology
+      <span class="small">(Deemed to be University under section 3 of UGC Act, 1956)</span>
+      <span class="school">School of Computer Science and Engineering (SCOPE)</span>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== 2. APPROVAL =========================== -->
+<section class="slide approve">
+  <h1 class="slide-title">Approval Mail From Guide</h1>
+
+  <p style="margin-left:26px;"><i>Get the approval for the following points from your guide through
+  mail before 01-09-2026.</i></p>
+
+  <div class="approval-box">
+    <div class="hd">The Fall Semester Project Review 2 for Project ID
+      <span class="fillin">&nbsp;</span> has been approved.</div>
+    <ul>
+      <li>Meeting with Guide Frequently: <b>Satisfied</b></li>
+      <li>PowerPoint Presentation: <b>Approved</b></li>
+      <li>Project Demonstration: <b>Approved</b></li>
+      <li>Project Report Draft: <b>Satisfied</b></li>
+      <li>Project Outcome: <b>Completed</b></li>
+    </ul>
+    <div style="font-family:var(--sans);font-size:15.5px;">All the above aspects are addressed and
+    updated by the project team.</div>
+  </div>
+
+  <p class="note" style="margin-left:26px;margin-top:16px;">
+    Text placeholder only. Replace this block with the actual approval mail screenshot from the
+    guide and fill in the Project ID before submission.
+  </p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>2</span></div>
+</section>
+
+<!-- =========================== 3. AIM =========================== -->
+<section class="slide airy">
+  <h1 class="slide-title">Aim</h1>
+
+  <p class="lead"><b>To build and measure a runtime control layer that lets an on-device RAG system
+  decide how much retrieval effort to spend on each query, using the live state of the device</b>,
+  instead of running one fixed configuration chosen at build time.</p>
+
+  <p class="sub-note">A fixed configuration has to be tuned either for the worst case, which wastes
+  recall almost all of the time, or for the average case, which then misses its latency budget
+  exactly when the phone is hot, busy with other apps, or low on battery.</p>
+
+  <p class="lead" style="margin-top:14px;"><b>To find out what that adaptation is actually
+  worth</b>, by measuring temperature, energy and latency on a real handset rather than estimating
+  them from a datasheet.</p>
+
+  <p class="sub-note">Every claim is reproducible from a config file and a seed. The controller's
+  own overhead is measured and reported as a metric in its own right, rather than being assumed
+  small.</p>
+
+  <p class="lead" style="margin-top:14px;"><b>Scope note.</b> The on-device half of the system is
+  retrieval. Answer generation runs on the host machine, not on the handset.</p>
+
+  <p class="caption" style="margin-top:26px;">
+    Baseline: MobileRAG (arXiv:2507.01079). &nbsp;·&nbsp; Target device: vivo I2304, Android 16.
+  </p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>3</span></div>
+</section>
+
+<!-- =========================== 4. ABSTRACT =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Abstract</h1>
+
+  <p>Running RAG on the phone itself gives privacy, offline operation and no per-query server cost.
+  But a phone is not a server. It <b>throttles when it gets hot, shares the CPU with other apps, and
+  discharges</b>. Every published on-device RAG system still ships a retrieval configuration that is
+  fixed once, at build time.</p>
+
+  <p>This project reimplements the <b>EcoVector</b> index and splits search into two parts: a cheap
+  <b>probe</b> that picks candidate clusters, and an expensive <b>finish</b> that loads and searches
+  them. The gap between the two is where a decision can be taken, per query, while the expensive
+  work is still uncommitted. Five control policies use live thermal, CPU and battery telemetry to
+  make that decision.</p>
+
+  <p>The system is evaluated on <b>SIFT1M, NYTimes and SQuAD</b>, on a laptop and on a
+  <b>vivo I2304</b> handset, with temperature and energy measured on the device itself.</p>
+
+  <p style="margin-top:12px;"><b>Three principal findings, two of them negative:</b></p>
+  <ul>
+    <li class="tight"><span class="red">MobileRAG's condition for using per-cluster graphs holds by
+      about 4000&times;, and the graphs still lose. The published cost model leaves out
+      deserialisation, which we measured at 95–99% of load cost.</span></li>
+    <li class="tight"><span class="red">The first control law collapsed to minimum effort with no
+      disturbance present at all. The cause is structural: its control period was shorter than the
+      observation delay, later measured at 68 s.</span></li>
+    <li class="tight"><span class="red">Content reduction is not free at any level. Every confidence
+      interval excludes zero.</span></li>
+  </ul>
+
+  <p>Energy was measured on battery at <b>3.206 mJ per cluster</b>, with the idle baseline
+  cross-checked two independent ways to within <b>7.9%</b>. Retrieval accounts for about
+  <b>19.5%</b> of a query's 131 mJ, which is a smaller claim than the literature usually makes, and
+  one we can defend.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>4</span></div>
+</section>
+
+<!-- =========================== 5. LIT REVIEW 1 =========================== -->
+<section class="slide roomy">
+  <h1 class="slide-title">Literature Review</h1>
+
+  <table>
+    <colgroup>
+      <col style="width:15%"><col style="width:17%"><col style="width:23%">
+      <col style="width:20%"><col style="width:25%">
+    </colgroup>
+    <thead>
+      <tr><th>Paper</th><th>Objective</th><th>Methodology</th><th>Pros / Cons</th><th>Findings</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>MobileRAG</b><br>Park et al., 2025</td>
+        <td>On-device RAG under a memory bound</td>
+        <td>EcoVector: IVF plus a centroid graph in RAM, per-cluster graphs on disk; SCR to shorten prompts</td>
+        <td><span class="green">Resident memory scales with the clusters opened</span><br>
+            <span class="red">– Configuration is fixed at build time</span></td>
+        <td><span class="red">Our baseline. Its cost model prices cluster access as pure I/O, with no
+            deserialisation term.</span></td>
+      </tr>
+      <tr>
+        <td><b>HNSW</b><br>Malkov &amp; Yashunin, TPAMI 2020</td>
+        <td>Best recall against latency for ANN search</td>
+        <td>Hierarchical proximity graph; M and ef set the degree and the beam width</td>
+        <td><span class="green">State of the art accuracy</span><br>
+            <span class="red">– The graph must be resident to traverse</span></td>
+        <td>The cost of materialising the graph is absent from the search-time analysis.</td>
+      </tr>
+      <tr>
+        <td><b>DiskANN</b><br>Jayaram Subramanya et al., NeurIPS 2019</td>
+        <td>Billion-point index served from SSD</td>
+        <td>Graph on SSD with a compressed in-memory cache</td>
+        <td><span class="green">Scales past available RAM</span><br>
+            <span class="red">– Assumes SSD-class random I/O</span></td>
+        <td>Phone flash behaves differently, which is why deserialisation dominates in our
+            measurements.</td>
+      </tr>
+      <tr>
+        <td><b>EdgeRAG</b><br>Seemakhupt et al., 2024</td>
+        <td>RAG on edge devices</td>
+        <td>Online index generation; embeddings computed on demand</td>
+        <td><span class="green">Bounds memory use</span><br>
+            <span class="red">– No runtime feedback at all</span></td>
+        <td><span class="red">Closest related work, and still open-loop: no thermal, contention or
+            energy input.</span></td>
+      </tr>
+      <tr>
+        <td><b>RECOMP</b><br>Xu et al., ICLR 2024</td>
+        <td>Shorter prompts for RAG</td>
+        <td>Compress retrieved documents into summaries before generation</td>
+        <td><span class="green">Real token savings</span><br>
+            <span class="red">– Fixed per deployment</span></td>
+        <td>The quality cost is never measured against a byte-identical no-compression control.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="caption" style="margin-top:12px;">1 of 2</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>5</span></div>
+</section>
+
+<!-- =========================== 6. LIT REVIEW 2 =========================== -->
+<section class="slide roomy">
+  <h1 class="slide-title">Literature Review</h1>
+
+  <table>
+    <colgroup>
+      <col style="width:15%"><col style="width:17%"><col style="width:23%">
+      <col style="width:20%"><col style="width:25%">
+    </colgroup>
+    <thead>
+      <tr><th>Paper</th><th>Objective</th><th>Methodology</th><th>Pros / Cons</th><th>Findings</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>RAG</b><br>Lewis et al., NeurIPS 2020</td>
+        <td>Ground a language model in a corpus</td>
+        <td>Dense retriever plus a seq2seq generator, trained end to end</td>
+        <td><span class="green">Defines the pipeline we use</span><br>
+            <span class="red">– Assumes server-class compute</span></td>
+        <td>Retrieval cost is taken as given and is never chosen at runtime.</td>
+      </tr>
+      <tr>
+        <td><b>ANN-Benchmarks</b><br>Aumüller et al., 2020</td>
+        <td>Standard evaluation for ANN algorithms</td>
+        <td>Public datasets shipped with brute-force ground truth</td>
+        <td><span class="green">External reference point</span><br>
+            <span class="red">– Server hardware only</span></td>
+        <td><span class="green">Its ground truth caught a real defect in our own distance
+            code.</span></td>
+      </tr>
+      <tr>
+        <td><b>AIMD</b><br>Chiu &amp; Jain, 1989</td>
+        <td>Convergence under distributed feedback</td>
+        <td>Additive increase, multiplicative decrease</td>
+        <td><span class="green">Provably converges</span><br>
+            <span class="red">– Assumes feedback arrives within the control interval</span></td>
+        <td><span class="red">Exactly the assumption our first control law violated.</span></td>
+      </tr>
+      <tr>
+        <td><b>TCP congestion control</b><br>Jacobson, SIGCOMM 1988</td>
+        <td>Stability under feedback delay</td>
+        <td>Window paced per round-trip time, not per acknowledgement</td>
+        <td><span class="green">Settles the delay question</span><br>
+            <span class="red">– Networking context only</span></td>
+        <td><span class="red">Never applied to retrieval effort. This is the cross-domain gap we
+            work in.</span></td>
+      </tr>
+      <tr>
+        <td><b>SQuAD</b><br>Rajpurkar et al., EMNLP 2016</td>
+        <td>Reading comprehension benchmark</td>
+        <td>Human span answers, scored with EM and token-F1</td>
+        <td><span class="green">Gold answers available</span><br>
+            <span class="red">– Single-hop, short answers</span></td>
+        <td>The only corpus that lets reduction be priced in answer quality rather than in tokens
+            saved.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="caption" style="margin-top:12px;">2 of 2 &nbsp;·&nbsp; 45 works reviewed in total across
+  ANN indexing, on-device RAG, RAG refinement and control theory.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>6</span></div>
+</section>
+
+<!-- =========================== 7. RESEARCH GAP =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Research Gap</h1>
+
+  <p><b>G1 — On-device retrieval is open-loop.</b> MobileRAG and EdgeRAG both fix the retrieval
+  configuration ahead of time. Neither one looks at temperature, contention or battery while it is
+  running.</p>
+  <p class="sub-note"><i>We address this by</i> putting a control decision between probe and finish,
+  driven by live telemetry (O1, O5).</p>
+
+  <p><b>G2 — Published cost models are untested on handset storage.</b> The conditions are stated as
+  comparison counts and validated on servers. Nobody measures what it costs to <i>materialise</i> an
+  index structure from phone flash, as distinct from reading its bytes.</p>
+  <p class="sub-note"><i>We address this by</i> measuring load cost on the handset and separating
+  deserialisation from I/O.</p>
+
+  <p><b>G3 — Energy is modelled, not measured.</b> On-device energy figures come from datasheets or
+  reference current models, not from a battery, per unit of retrieval work, with the idle baseline
+  separated out.</p>
+  <p class="sub-note"><i>We address this by</i> duty-cycling the workload so the idle baseline is
+  observed rather than extrapolated (O4).</p>
+
+  <p><b>G4 — Feedback delay is not a design parameter.</b> The interval between a control action and
+  its appearance in the controlled signal is never measured. A controller faster than that interval
+  is unstable, for reasons settled decades ago in networking.</p>
+  <p class="sub-note"><i>We address this by</i> fitting a thermal model on the device and reporting
+  the measured delay as a design constant (O5).</p>
+
+  <p><b>G5 — Content reduction is not priced in answer quality.</b> Prompt compression reports token
+  and latency savings, rarely against a byte-identical control on a corpus that has gold answers.</p>
+  <p class="sub-note"><i>We address this by</i> scoring every reduction level against a byte-identical
+  passthrough on SQuAD (O2).</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>7</span></div>
+</section>
+
+<!-- =========================== 8. OBJECTIVES =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Objectives</h1>
+
+  <p><b>O1 (C1) — Adapt retrieval effort at runtime.</b> Two-phase search plus policies that pick
+  the effort for each query. <i>Measured by:</i> violation rate under induced contention, with
+  controller overhead reported. &nbsp;&rarr;&nbsp; G1</p>
+
+  <p><b>O2 (C2) — Adapt content reduction and price it in quality.</b> Compared against a
+  byte-identical passthrough control. <i>Measured by:</i> EM and F1 against passthrough, with paired
+  bootstrap confidence intervals. &nbsp;&rarr;&nbsp; G5</p>
+
+  <p><b>O3 (C3) — Test whether joint control beats separate control.</b> A 3&times;3 surface, with
+  the criterion declared before the run. <i>Measured by:</i> Pareto domination. &nbsp;&rarr;&nbsp;
+  G1, G5</p>
+
+  <p><b>O4 (C4) — Measure energy on the device.</b> A duty-cycled trace, so the idle baseline is
+  observed rather than extrapolated. <i>Measured by:</i> marginal mJ per cluster with a confidence
+  interval excluding zero, and a physically sensible intercept. &nbsp;&rarr;&nbsp; G3</p>
+
+  <p><b>O5 (C5) — Adapt to thermal and battery state.</b> Fit a thermal model, obtain the
+  observation delay, and test against a tuned static baseline. <i>Measured by:</i> violations and
+  recall, with the same effective budget in both arms. &nbsp;&rarr;&nbsp; G1, G3, G4</p>
+
+  <div class="obj-foot">
+    <div>
+      <div class="hd">Identified: Sustainable Development Goals</div>
+      <div class="bd">SDG 9 — Industry, Innovation and Infrastructure<br>
+                      SDG 12 — Responsible Consumption and Production</div>
+    </div>
+    <div>
+      <div class="hd">Technology Readiness Level</div>
+      <div class="bd">TRL 5 — Technology validated in a relevant environment
+        (real handset, real corpora, measured on battery)</div>
+    </div>
+    <div>
+      <div class="hd">Outcomes</div>
+      <div class="bd">Conference (Scopus). The negative results and the 68 s delay constant are the
+        publishable contribution.</div>
+    </div>
+  </div>
+
+  <p class="note" style="margin-top:8px;">SDG, TRL and Outcome are the team's own assessment.
+  To be confirmed with the guide before submission.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>8</span></div>
+</section>
+
+<!-- =========================== 9. ARCHITECTURE =========================== -->
+<section class="slide arch">
+  <h1 class="slide-title">Framework / Architecture / Block Diagram</h1>
+
+  <div class="band-label">QUERY PATH</div>
+  <div class="row">
+    <div class="box q"><div class="t">Query</div><div class="d">text question</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="box q"><div class="t">Embed</div><div class="d">384-d, unit norm</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="box q"><div class="t">probe()</div><div class="d">centroid graph in RAM<br>under 1 ms</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="box q"><div class="t">finish()</div><div class="d">load, search, unload<br>dominant cost</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="box"><div class="t">Content reduction</div><div class="d">sentence windows<br>scored vs query</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="box"><div class="t">Generator</div><div class="d">seq2seq, greedy<br>runs on host</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="box out"><div class="t">Answer</div><div class="d">scored EM / F1</div></div>
+  </div>
+
+  <div class="uplink">&uarr;<span class="lab">DECISION TAKEN BETWEEN probe() AND finish()</span></div>
+
+  <div class="band-label ctrl">CONTROL LAYER</div>
+  <div class="row">
+    <div class="box ctrl"><div class="t">Static</div><div class="d">tuned by grid search</div></div>
+    <div class="box ctrl"><div class="t">AIMD</div><div class="d">explicit control period</div></div>
+    <div class="box ctrl"><div class="t">Budget</div><div class="d">measured percentile table</div></div>
+    <div class="box ctrl"><div class="t">Device-state</div><div class="d">temperature, slope, battery</div></div>
+    <div class="box ctrl"><div class="t">Energy budget</div><div class="d">integrates V &middot; I &middot; dt</div></div>
+  </div>
+
+  <div class="uplink">&uarr;<span class="lab">SAMPLED ON A BACKGROUND THREAD, NEVER BLOCKS A QUERY</span></div>
+
+  <div class="band-label tele">TELEMETRY &nbsp;(capability-gated)</div>
+  <div class="row">
+    <div class="box tele"><div class="t">Temperature</div><div class="d">110 thermal zones, skin + SoC</div></div>
+    <div class="box tele"><div class="t">CPU</div><div class="d">frequency, 3 clock domains</div></div>
+    <div class="box tele"><div class="t">Battery</div><div class="d">current and voltage</div></div>
+    <div class="box tele"><div class="t">Load</div><div class="d">CPU and memory</div></div>
+    <div class="box tele"><div class="t">Capability table</div><div class="d">earned by a live read</div></div>
+  </div>
+
+  <div class="band-label" style="margin-top:4px;">STORAGE AND PROVENANCE</div>
+  <div class="row" style="margin-bottom:4px;">
+    <div class="box store"><div class="t">Centroid graph</div><div class="d">RAM, rebuilt on device in 0.016 s</div></div>
+    <div class="box store"><div class="t">Clusters on disk</div><div class="d">mmap, flat arrays, portable</div></div>
+    <div class="box store"><div class="t">Artifact manifest</div><div class="d">SHA-256 per file</div></div>
+    <div class="box store"><div class="t">Run manifest + parquet</div><div class="d">commit, config hash, seed, host</div></div>
+  </div>
+
+  <p class="caption" style="margin-top:8px;">The probe / finish split is what makes control
+  possible: cheap evidence is available before the expensive work is committed.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>9</span></div>
+</section>
+
+<!-- =========================== 10. FUNCTIONAL REQUIREMENTS =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Functional Requirements</h1>
+
+  <ul>
+    <li><b>Corpus preparation.</b> Download each dataset, check it against a recorded SHA-256, split
+      the text into chunks, embed them, and load the exact ground-truth neighbours and distances.</li>
+    <li><b>Index construction.</b> Partition the vectors into clusters, build the centroid graph,
+      write the clusters to disk, and record the build in a manifest keyed by the config hash.</li>
+    <li><b>Two-phase search.</b> <i>probe()</i> returns candidate clusters and cheap query features.
+      <i>finish()</i> loads, searches and unloads them. The control decision sits between the two.</li>
+    <li><b>Device telemetry.</b> Sample temperature, clock frequency and battery on a background
+      thread, and publish a capability table that states what can actually be read on this device.</li>
+    <li><b>Control policies.</b> Choose the effort level and the reduction level for each query, and
+      record the decision, the inputs it used, and how long it took to make.</li>
+    <li><b>Content reduction.</b> Score sentence windows against the query and keep the best ones.
+      When reduction is disabled the prompt must be byte-identical to the unreduced one.</li>
+    <li><b>Generation and scoring.</b> Build the prompt, generate the answer, and score Exact Match
+      and token-F1 against the gold answer.</li>
+    <li><b>Record keeping.</b> One parquet row per query holding latency, recall, config, overhead
+      and provenance, plus a run manifest with the commit, config hash, library versions, host and
+      seed.</li>
+    <li><b>Model fitting.</b> Fit the latency, thermal and energy models, and refuse to report any
+      coefficient that the data does not actually support.</li>
+  </ul>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>10</span></div>
+</section>
+
+<!-- =========================== 11. MODULES =========================== -->
+<section class="slide roomy">
+  <h1 class="slide-title">Modules</h1>
+
+  <table class="tbl-tight">
+    <colgroup>
+      <col style="width:13%"><col style="width:25%"><col style="width:9%"><col style="width:53%">
+    </colgroup>
+    <thead>
+      <tr><th>Module</th><th>Responsibility</th><th>Status</th><th>Evidence it works</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>M1 Data</b></td><td>Download, verify, chunk, embed; ground truth</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Digest verified per artifact; two-way manifest check; a missing corpus is reported, never substituted</td></tr>
+      <tr><td><b>M2 Index</b></td><td>Build plus two-phase search (probe / finish)</td>
+        <td class="green"><b>Complete</b></td>
+        <td>15 acceptance checks, <b>14 PASS and 1 FAIL</b> that is a documented NYTimes property, not a defect; footprint within 1.24&times; of the published figure</td></tr>
+      <tr><td><b>M3 Telemetry</b></td><td>Host and device state, capability gate</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Every capability earned by a live read; a manifest claiming an unavailable field is refused</td></tr>
+      <tr><td><b>M4 Controller</b></td><td>Five policies plus a measured profile table</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Overhead measured per query (<b>0.53% p50</b>); the collapse was diagnosed against a prediction stated in advance</td></tr>
+      <tr><td><b>M5 Reduction</b></td><td>Sentence-window selection (SCR)</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Byte-identical passthrough asserted; the reduction ladder was validated on real data before use</td></tr>
+      <tr><td><b>M6 Generation</b></td><td>Prompt, generation, EM / F1</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Greedy decoding for determinism; truncation reported per arm; <b>n = 1000</b> with paired confidence intervals</td></tr>
+      <tr><td><b>M7 Experiments</b></td><td>Contention, profile, joint surface, device traces</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Cells interleaved; machine load sampled across the whole run; contaminated runs given a distinct exit code</td></tr>
+      <tr><td><b>M8 Models</b></td><td>Latency, thermal and energy fits</td>
+        <td class="green"><b>Complete</b></td>
+        <td>Energy refuses to fit where energy cannot be measured; attribution refused without a measured baseline</td></tr>
+      <tr><td><b>Driver</b></td><td>End-to-end verification from documented entry points</td>
+        <td class="green"><b>Complete</b></td>
+        <td><b>7 steps</b>; a step producing no output at all is marked FAILED regardless of its exit code</td></tr>
+    </tbody>
+  </table>
+
+  <p class="caption" style="margin-top:10px;">447 tests &nbsp;·&nbsp; ruff and mypy strict clean
+  &nbsp;·&nbsp; 57 ADRs &nbsp;·&nbsp; 25 defects caught before any of them reached a reported
+  number.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>11</span></div>
+</section>
+
+<!-- =========================== 12. EXPERIMENTS 1 =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Experiments and Results <span class="sub">— Index and the principal
+  finding</span></h1>
+
+  <div class="two-col">
+    <div style="flex:0 0 44%;">
+      <table class="tbl-tight">
+        <colgroup><col style="width:28%"><col style="width:22%"><col style="width:22%"><col style="width:28%"></colgroup>
+        <thead><tr><th>Resident footprint<br>(fresh process)</th><th>Measured</th><th>MobileRAG Fig. 6</th><th>Ratio</th></tr></thead>
+        <tbody>
+          <tr><td>SIFT1M</td><td class="n">12.01 MB</td><td class="n">9.67 MB</td>
+              <td class="green"><b>1.24&times;</b> validates the implementation</td></tr>
+          <tr><td>NYTimes</td><td class="n">40.81 MB</td><td class="n">3.53 MB</td>
+              <td class="red"><b>11.6&times;</b> open question, reported as one</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="flex:1 1 0;">
+      <table class="tbl-tight">
+        <colgroup><col style="width:36%"><col style="width:16%"><col style="width:16%"><col style="width:16%"><col style="width:16%"></colgroup>
+        <thead><tr><th>Latency (ms) at matched recall</th><th>~0.65</th><th>~0.82</th><th>~0.92</th><th>~0.98</th></tr></thead>
+        <tbody>
+          <tr><td>ivf_disk (flat, mmap)</td><td class="n green"><b>8.46</b></td><td class="n green"><b>112.41</b></td>
+              <td class="n green"><b>114.14</b></td><td class="n green"><b>51.93</b></td></tr>
+          <tr><td>per-cluster graphs M=16</td><td class="n">22.28</td><td class="n">235.41</td>
+              <td class="n">292.52</td><td class="n">138.13</td></tr>
+          <tr><td>per-cluster graphs M=32</td><td class="n">29.90</td><td class="n">258.36</td>
+              <td class="n">305.54</td><td class="n">143.63</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p style="margin-top:12px;"><b>MobileRAG's condition for preferring per-cluster graphs holds by a
+  wide margin.</b> The condition ef_L &middot; M&prime; &lt; N/Nc gives <b>4000</b> for SIFT1M, and
+  the graphs <b>still lose</b>, by 2.5 to 2.8&times; at every matched recall point. Recall is
+  effectively identical across all three (0.6487–0.6507 up to 0.9783–0.9807), so this is a fair
+  comparison.</p>
+
+  <p>The graphs <b>do</b> save distance comparisons exactly as predicted, 2,298 against 8,784 at the
+  first point. They lose anyway.</p>
+
+  <p class="red" style="margin-left:22px;"><b>Why.</b> The published condition counts distance
+  comparisons and prices cluster access as pure I/O. Measured on the handset, 95–99% of load cost is
+  <b>deserialisation</b>, which is a term the model does not contain. Materialising a graph costs far
+  more than materialising a flat array.</p>
+
+  <p class="defn" style="margin-left:22px;"><i>Deserialisation: turning the stored bytes on flash
+  back into a usable in-memory structure, as opposed to simply reading those bytes.</i></p>
+
+  <p><b>Consequence for the design.</b> Cluster payloads in SMART-ANN are flat and memory-mapped.
+  This is a measured decision, not a default. <b>Cost model:</b> 14.75% MAPE on quiet data against a
+  15% target, but <b>35.87% on contended data</b>, because the CPU-utilisation feature saturates at
+  1.000 for 12,469 samples while the latency it has to explain spans 41&times;. That is why the
+  budget policy reads measured percentiles instead of predictions.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>12</span></div>
+</section>
+
+<!-- =========================== 13. EXPERIMENTS 2 =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Experiments and Results <span class="sub">— C1 adaptive control, C2
+  quality, C3 joint</span></h1>
+
+  <div class="two-col">
+    <div style="flex:0 0 55%;">
+      <table class="tbl-tight">
+        <colgroup><col style="width:16%"><col style="width:14%"><col style="width:14%"><col style="width:16%"><col style="width:16%"><col style="width:12%"><col style="width:12%"></colgroup>
+        <thead><tr><th>Phase</th><th>Policy</th><th>Target</th><th>Violations</th><th>recall@10</th><th>nprobe p50</th><th>Overhead p95</th></tr></thead>
+        <tbody>
+          <tr><td>Quiet</td><td>Static</td><td class="n">33.36 ms</td><td class="n green"><b>0.66%</b></td><td class="n">0.8821</td><td class="n">16</td><td class="n">0.005%</td></tr>
+          <tr><td>Quiet</td><td>AIMD</td><td class="n">33.36 ms</td><td class="n red"><b>6.09%</b></td><td class="n red"><b>0.4643</b></td><td class="n red"><b>1</b></td><td class="n">0.634%</td></tr>
+          <tr><td>Contended</td><td>Static</td><td class="n">16.68 ms</td><td class="n red"><b>28.17%</b></td><td class="n">0.8805</td><td class="n">16</td><td class="n">0.005%</td></tr>
+          <tr><td>Contended</td><td>AIMD</td><td class="n">16.68 ms</td><td class="n green"><b>6.27%</b></td><td class="n">0.4079</td><td class="n">1</td><td class="n">0.644%</td></tr>
+          <tr><td>Recovery</td><td>Static</td><td class="n">33.36 ms</td><td class="n green"><b>0.08%</b></td><td class="n">0.8813</td><td class="n">16</td><td class="n">0.005%</td></tr>
+          <tr><td>Recovery</td><td>AIMD</td><td class="n">33.36 ms</td><td class="n red"><b>5.62%</b></td><td class="n">0.4665</td><td class="n red"><b>1</b></td><td class="n">0.621%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="flex:1 1 0;">
+      <table class="tbl-tight">
+        <colgroup><col style="width:20%"><col style="width:13%"><col style="width:13%"><col style="width:14%"><col style="width:12%"><col style="width:28%"></colgroup>
+        <thead><tr><th>SCR arm</th><th>EM</th><th>F1</th><th>Tokens</th><th>Cut</th><th>&Delta;F1 (95% CI)</th></tr></thead>
+        <tbody>
+          <tr><td>off</td><td class="n">0.606</td><td class="n">0.6769</td><td class="n">571</td><td class="n">—</td><td>baseline</td></tr>
+          <tr><td>keep1_ext</td><td class="n">0.595</td><td class="n">0.6661</td><td class="n">475</td><td class="n">19.4%</td><td class="n">−0.0108 [−0.0212, −0.0009]</td></tr>
+          <tr><td>keep2</td><td class="n">0.585</td><td class="n">0.6569</td><td class="n">448</td><td class="n">25.2%</td><td class="n">−0.0200 [−0.0329, −0.0083]</td></tr>
+          <tr><td>keep1</td><td class="n">0.511</td><td class="n">0.5824</td><td class="n">269</td><td class="n">61.4%</td><td class="n red"><b>−0.0945 [−0.1154, −0.0740]</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p style="margin-top:11px;"><b>C1 — the intended result is one row.</b> Under contention,
+  violations fall from 28.17% to 6.27%. <b>Everything else on that table is the finding.</b> In the
+  quiet phase, with no disturbance at all, AIMD sat at nprobe = 1, missed the target <i>more</i>
+  often than static (6.09% against 0.66%), and gave up 0.418 recall for nothing.</p>
+
+  <p class="red" style="margin-left:22px;"><b>The recovery row is the proof.</b> Static returns to
+  0.08% once contention lifts. AIMD stays at 5.62% and never climbs back. A working controller
+  recovers; this one has no path up. The cause is that its control period was shorter than the
+  observation delay, so every action looked ineffective and it decayed steadily to its floor. This is
+  the same condition that makes TCP pace per round-trip time rather than per acknowledgement.</p>
+
+  <p><b>C2 — reduction is not free at any level.</b> Every &Delta;F1 interval excludes zero,
+  including the mildest one. But the trade-off is smooth and monotone, which is what a controller
+  needs: keep1 buys about a 47% cut in generation latency for about a 14% relative F1 loss.</p>
+
+  <p class="defn" style="margin-left:22px;"><i>Honest caveat: for keep1_ext the EM interval
+  [−0.022, +0.000] touches zero. F1 detects a degradation that EM cannot resolve at n = 1000, so we
+  report both.</i></p>
+
+  <p><b>C3 — 3 joint cells sit on the Pareto front</b>, so C3 is supported by the pre-declared test,
+  but <b>0 cells dominate</b> the best single-dimension cell. Joint control does not raise the
+  ceiling. It extends the frontier downward in cost, into the region a controller occupies when it is
+  under pressure.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>13</span></div>
+</section>
+
+<!-- =========================== 14. EXPERIMENTS 3 =========================== -->
+<section class="slide">
+  <h1 class="slide-title">Experiments and Results <span class="sub">— On-device: thermal (C5a),
+  energy (C4), C5 result</span></h1>
+
+  <div class="two-col">
+    <div style="flex:0 0 47%;">
+      <table class="tbl-tight">
+        <colgroup><col style="width:36%"><col style="width:12.8%"><col style="width:12.8%"><col style="width:12.8%"><col style="width:12.8%"><col style="width:12.8%"></colgroup>
+        <thead><tr><th>Thermal fit — window sweep</th><th>3 s</th><th>15 s</th><th>30 s &#10003;</th><th>60 s</th><th>120 s</th></tr></thead>
+        <tbody>
+          <tr><td>Intervals</td><td class="n">446</td><td class="n">89</td><td class="n">44</td><td class="n">22</td><td class="n red"><b>11</b></td></tr>
+          <tr><td>R&sup2;</td><td class="n">0.109</td><td class="n">0.230</td><td class="n">0.304</td><td class="n">0.187</td><td class="n red"><b>0.691</b></td></tr>
+          <tr><td>Time constant &tau;</td><td class="n">107 s</td><td class="n">67 s</td><td class="n green"><b>68 s</b></td><td class="n">97 s</td><td class="n">76 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="flex:1 1 0;">
+      <table class="tbl-tight">
+        <colgroup><col style="width:40%"><col style="width:18%"><col style="width:42%"></colgroup>
+        <thead><tr><th>Energy, measured on battery</th><th>Value</th><th>95% CI (10,000 resamples)</th></tr></thead>
+        <tbody>
+          <tr><td>All-in per query</td><td class="n">130.99 mJ</td><td class="n">—</td></tr>
+          <tr><td>Marginal cost per cluster</td><td class="n">3.206 mJ</td><td class="n green"><b>[2.145, 4.201] excludes zero</b></td></tr>
+          <tr><td>Fitted baseline power</td><td class="n">0.7091 W</td><td class="n">[0.5957, 0.8385] positive</td></tr>
+          <tr><td>Directly measured idle power</td><td class="n">0.6571 W</td><td class="green"><b>median of 60 idle intervals, agrees to 7.9%</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p style="margin-top:11px;"><b>&tau; = 68 s is the most useful number the project produced.</b> It
+  is the thermal observation delay, and the control law on the previous slide collapsed precisely
+  because its control period was shorter than it. Any thermally aware controller now has a
+  <i>measured</i> value it must exceed.</p>
+
+  <p class="defn" style="margin-left:22px;"><i>The 120 s row scores the highest R&sup2; and is
+  excluded: 11 points against 3 free parameters flatters itself. What supports the fit is the
+  stability of &tau; (67–107 s) and of the work coefficient (within 1.6&times;) while R&sup2; swings
+  from 0.11 to 0.69.</i></p>
+
+  <p><b>C4 — the intercept is credible because two independent routes agree to 7.9%:</b> a
+  regression extrapolated to zero work, and the median of intervals that actually sat at zero work.
+  An earlier trace with no idle periods gave −0.209 W, a device consuming negative power. It was
+  recorded as not reportable and printed with its reasoning. The estimator did not change; the
+  experiment did, to 60 s on and 30 s idle. Retrieval is <b>19.5%</b> of a query's 131 mJ at the
+  operating point (2.4% minimum, 78.2% maximum); display and radios are about 65% of mean power.</p>
+
+  <p class="red"><b>C5 — a negative result, reported as one.</b> Across 27,985 queries interleaved
+  against a tuned static baseline, violations were <b>1.8% against 1.8%</b> (difference CI
+  [−0.379, +0.257] pp, which includes zero) while the adaptive arm gave up <b>0.029 recall</b>
+  (CI [−0.0334, −0.0249], which excludes zero). It paid a real cost for no measurable benefit.</p>
+
+  <p class="defn" style="margin-left:22px;"><i>The policy is not defective. On the 901 moments where
+  it derated, p95 latency was 43.15 ms against the baseline's 77.56 ms. It chose the wrong moments.
+  Cause: skin temperature peaked at 36.5 °C, so the 42 °C tier never fired. The thermal signal is
+  real and measurable, but not predictive of latency on this workload. A half-width of 0.318 pp means
+  this is a null result, not an underpowered one.</i></p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>14</span></div>
+</section>
+
+<!-- =========================== 15. CONCLUSION =========================== -->
+<section class="slide airy">
+  <h1 class="slide-title">Conclusion</h1>
+
+  <p><b>A runtime control layer for on-device RAG has been built, measured end to end, and is
+  reproducible from a config file and a seed.</b> All 9 modules are complete, 447 tests pass, and
+  4 of the 5 objectives resolved positively. The fifth resolved negatively, with its cause
+  identified.</p>
+
+  <p><b>The most transferable output is a constant, not a system: &tau; = 68 s.</b> It bounds how
+  fast any thermally aware controller on this class of device may act, and it explains a failure that
+  the literature would have predicted if the two fields had cited each other.</p>
+
+  <p><b>Two negative results are reported rather than buried</b>, because each one identifies a
+  cause:</p>
+  <ul>
+    <li class="tight"><span class="red">A published cost model is contradicted by measurement. It
+      omits deserialisation, which dominates on handset flash.</span></li>
+    <li class="tight"><span class="red">A measurable device signal, temperature, is shown <i>not</i>
+      to be predictive of the quantity being controlled on this workload.</span></li>
+  </ul>
+
+  <p><b>Limitations, stated plainly.</b> Generation runs on the host machine, not on the handset, so
+  the on-device half of the system is retrieval. Only one device was used, so the thermal constants
+  are specific to it. C5 was never tested under real throttling.</p>
+
+  <p><b>Project-II.</b> A thermal simulator fitted to the measured trace; a second handset; reduction
+  embeddings precomputed at index time (721 ms cold, 8 ms warm); a fair C5 test under a workload that
+  actually throttles; and on-device generation.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>15</span></div>
+</section>
+
+<!-- =========================== 16. REFERENCES =========================== -->
+<section class="slide">
+  <h1 class="slide-title">References</h1>
+
+  <div class="refs">
+    <p>[1] D. Park, J. Lee, and S. Kim, "MobileRAG: A fast, memory-efficient, and energy-efficient
+      method for on-device RAG," <i>arXiv preprint</i> arXiv:2507.01079, 2025.</p>
+    <p>[2] Y. A. Malkov and D. A. Yashunin, "Efficient and robust approximate nearest neighbor search
+      using hierarchical navigable small world graphs," <i>IEEE Trans. Pattern Anal. Mach. Intell.</i>,
+      vol. 42, no. 4, pp. 824–836, Apr. 2020.</p>
+    <p>[3] S. Jayaram Subramanya, F. Devvrit, H. V. Simhadri, R. Krishnaswamy, and R. Kadekodi,
+      "DiskANN: Fast accurate billion-point nearest neighbor search on a single node," in
+      <i>Adv. Neural Inf. Process. Syst. (NeurIPS)</i>, 2019, pp. 13748–13758.</p>
+    <p>[4] K. Seemakhupt, S. Liu, and S. Khan, "EdgeRAG: Online-indexed RAG for edge devices,"
+      <i>arXiv preprint</i> arXiv:2412.21023, 2024.</p>
+    <p>[5] P. Lewis et al., "Retrieval-augmented generation for knowledge-intensive NLP tasks," in
+      <i>Adv. Neural Inf. Process. Syst. (NeurIPS)</i>, 2020, pp. 9459–9474.</p>
+    <p>[6] M. Aumüller, E. Bernhardsson, and A. Faithfull, "ANN-Benchmarks: A benchmarking tool for
+      approximate nearest neighbor algorithms," <i>Information Systems</i>, vol. 87, 101374,
+      Jan. 2020.</p>
+    <p>[7] P. Rajpurkar, J. Zhang, K. Lopyrev, and P. Liang, "SQuAD: 100,000+ questions for machine
+      comprehension of text," in <i>Proc. EMNLP</i>, Austin, TX, USA, 2016, pp. 2383–2392.</p>
+    <p>[8] D.-M. Chiu and R. Jain, "Analysis of the increase and decrease algorithms for congestion
+      avoidance in computer networks," <i>Computer Networks and ISDN Systems</i>, vol. 17, no. 1,
+      pp. 1–14, Jun. 1989.</p>
+    <p>[9] V. Jacobson, "Congestion avoidance and control," in <i>Proc. ACM SIGCOMM</i>, Stanford,
+      CA, USA, 1988, pp. 314–329.</p>
+    <p>[10] F. Xu, W. Shi, and E. Choi, "RECOMP: Improving retrieval-augmented LMs with context
+      compression and selective augmentation," in <i>Proc. ICLR</i>, 2024.</p>
+    <p>[11] C. Raffel et al., "Exploring the limits of transfer learning with a unified text-to-text
+      transformer," <i>J. Machine Learning Research</i>, vol. 21, no. 140, pp. 1–67, 2020.</p>
+    <p>[12] A. Carroll and G. Heiser, "An analysis of power consumption in a smartphone," in
+      <i>Proc. USENIX Annu. Technical Conf. (ATC)</i>, 2010, pp. 271–284.</p>
+  </div>
+
+  <p class="note" style="margin-top:10px;">Full 45-reference list in the project report. Verify page
+  ranges and volume numbers against the publisher record before submission.</p>
+
+  <div class="footer"><span>09-09-2026</span><span class="mid">SCOPE</span><span>16</span></div>
+</section>
+
+</body>
+</html>

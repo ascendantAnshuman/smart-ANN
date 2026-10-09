@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,7 +42,23 @@ class QaCorpus:
             raise FileNotFoundError(
                 f"{self.path} does not exist; run `smartann data prepare squad` first"
             )
-        self._conn = sqlite3.connect(str(self.path))
+        # Shared across threads, and that needs BOTH of these.
+        #
+        # check_same_thread=False, because this connection outlives the thread that
+        # opened it: a Streamlit run, or any server reusing a loaded pipeline, hands
+        # the same object to a different worker thread on the next interaction, and
+        # SQLite's guard then raises on the SECOND question rather than the first.
+        #
+        # And a lock, because disabling that guard is not on its own sufficient.
+        # sqlite3.threadsafety is 3, which makes the *library* serialised; it does
+        # not make one Connection safe to drive from two Python threads at once.
+        # Concurrent readers against a shared connection have been observed raising
+        # "not enough values to unpack" -- a fetch landing on another thread's
+        # statement. Every use of the connection therefore takes `self._lock`,
+        # which is reentrant because the write paths call read helpers that
+        # take it again.
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._assert_contiguous_chunk_ids()
 
@@ -52,9 +69,10 @@ class QaCorpus:
         up would be off by a constant and the resulting EM/F1 would read as a
         bad model rather than a broken join.
         """
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n, MIN(chunk_id) AS lo, MAX(chunk_id) AS hi FROM metadata"
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n, MIN(chunk_id) AS lo, MAX(chunk_id) AS hi FROM metadata"
+            ).fetchone()
         n, lo, hi = int(row["n"]), int(row["lo"]), int(row["hi"])
         if (lo, hi) != (0, n - 1):
             raise ValueError(
@@ -69,20 +87,44 @@ class QaCorpus:
         if not ids:
             return []
         placeholders = ",".join("?" * len(ids))
-        rows = self._conn.execute(
-            f"SELECT chunk_id, text FROM metadata WHERE chunk_id IN ({placeholders})",
-            tuple(ids),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT chunk_id, text FROM metadata WHERE chunk_id IN ({placeholders})",
+                tuple(ids),
+            ).fetchall()
         by_id = {int(r["chunk_id"]): str(r["text"]) for r in rows}
         # SQL returns no particular order; restore retrieval rank explicitly.
         return [by_id[i] for i in ids if i in by_id]
+
+    def chunk_titles(self, chunk_ids: Sequence[int]) -> list[str]:
+        """The article each chunk came from, in the order given.
+
+        Needed to cite an answer: a passage number means nothing to a reader,
+        and "Albert Einstein, SQuAD/Wikipedia" says where to go and check. A
+        chunk with no document row gets an empty title rather than a guess.
+        """
+        ids = [int(c) for c in chunk_ids if int(c) >= 0]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT m.chunk_id, COALESCE(d.title, '') AS title FROM metadata m "
+                "LEFT JOIN documents d ON d.doc_id = m.doc_id "
+                f"WHERE m.chunk_id IN ({placeholders})",
+                tuple(ids),
+            ).fetchall()
+        by_id = {int(r["chunk_id"]): str(r["title"]) for r in rows}
+        return [by_id.get(i, "") for i in ids]
 
     def questions(self, limit: int | None = None) -> list[QaQuestion]:
         sql = "SELECT query_id, squad_id, question, answers, gold_doc_id FROM queries ORDER BY query_id"
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
         out = []
-        for r in self._conn.execute(sql):
+        with self._lock:
+            fetched = self._conn.execute(sql).fetchall()
+        for r in fetched:
             answers = tuple(json.loads(r["answers"]))
             if not answers:
                 raise ValueError(

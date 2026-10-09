@@ -84,7 +84,12 @@ class QueryFeatures:
     """Cheap signals available BEFORE the expensive per-cluster search."""
 
     centroid_top1_dist: float
-    centroid_dist_gap: float  # d2/d1 -- low gap => ambiguous query => harder
+    # d2 - d1, a difference and not the ratio this comment used to claim: a ratio
+    # divides by a distance that can be zero or negative for duplicate vectors
+    # (see EcoVectorIndex.probe). A small gap means the query sits between
+    # clusters and is harder; Phase 9 measures recall 0.278 at nprobe=1 in the
+    # smallest-gap fifth against 0.978 in the largest.
+    centroid_dist_gap: float
     centroid_dist_entropy: float
     query_norm: float
     query_token_len: int

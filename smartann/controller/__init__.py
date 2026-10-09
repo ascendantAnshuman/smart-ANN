@@ -9,6 +9,8 @@ from smartann.controller.policies import (
     DeviceTiers,
     EnergyBudgetPolicy,
     EnergySample,
+    QueryAdaptivePolicy,
+    QueryEffortFit,
     StaticPolicy,
     integrate_mj,
 )
@@ -25,6 +27,8 @@ __all__ = [
     "Policy",
     "ProfileEntry",
     "ProfileTable",
+    "QueryAdaptivePolicy",
+    "QueryEffortFit",
     "StaticPolicy",
     "TimedDecision",
     "build_profile_table",

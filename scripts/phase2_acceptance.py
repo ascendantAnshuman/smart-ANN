@@ -26,12 +26,17 @@ import numpy as np
 import psutil
 
 from smartann.bench.metrics import recall_at_k_batch
-from smartann.config import config_hash, load_yaml, resolve_paths
+from smartann.config import resolve_paths
 from smartann.data.readers import load_ground_truth, load_processed
 from smartann.data.registry import spec_for
 from smartann.index.baselines import FlatHnswIndex, compare_note
 from smartann.index.ecovector import EcoVectorIndex
-from smartann.index.storage import IndexBuildConfig, IndexMeta, IndexPaths, memory_model_mb
+from smartann.index.storage import (
+    IndexMeta,
+    IndexPaths,
+    memory_model_mb,
+    resolve_index_root,
+)
 from smartann.types import AnnConfig
 
 RESULTS: list[tuple[str, bool, str]] = []
@@ -151,18 +156,13 @@ def index_root(dataset: str, variant: str) -> IndexPaths | None:
 
     Returns None only when the index is genuinely not built. A missing config
     *directory* is a broken checkout rather than a missing index, and raises.
+
+    Delegates to `smartann.index.storage.resolve_index_root`, which is where the
+    resolution now lives so the library's own query path and these scripts
+    cannot disagree about which artifact a result came from. Kept as a name here
+    because several scripts import it.
     """
-    if not CONFIG_DIR.is_dir():
-        raise FileNotFoundError(
-            f"{CONFIG_DIR} does not exist. Without it every check would report "
-            "'no index built' and FAIL, which is a misreport rather than a result."
-        )
-    cfg_path = CONFIG_DIR / f"{dataset}_{variant}.yaml"
-    if not cfg_path.exists():
-        return None
-    cfg = load_yaml(cfg_path, IndexBuildConfig)
-    root = resolve_paths().data_root / "index" / dataset / config_hash(cfg)
-    return IndexPaths(root) if (root / "meta.json").exists() else None
+    return resolve_index_root(dataset, variant, config_dir=CONFIG_DIR)
 
 
 def load_all(dataset: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

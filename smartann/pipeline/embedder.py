@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,23 @@ class EmbeddingCache:
         self.path = Path(path)
         self.dim = dim
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path))
+        # Shared across threads, and that needs BOTH of these.
+        #
+        # check_same_thread=False, because this connection outlives the thread that
+        # opened it: a Streamlit run, or any server reusing a loaded pipeline, hands
+        # the same object to a different worker thread on the next interaction, and
+        # SQLite's guard then raises on the SECOND question rather than the first.
+        #
+        # And a lock, because disabling that guard is not on its own sufficient.
+        # sqlite3.threadsafety is 3, which makes the *library* serialised; it does
+        # not make one Connection safe to drive from two Python threads at once.
+        # Four concurrent readers against this cache raised "not enough values to
+        # unpack (expected 2, got 0)" -- a fetch landing on another thread's
+        # statement. Every use of the connection therefore takes `self._lock`,
+        # which is reentrant because the write paths call read helpers that
+        # take it again.
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, vec BLOB)")
         self._conn.commit()
@@ -55,25 +72,28 @@ class EmbeddingCache:
     def get_many(self, keys: Sequence[str]) -> dict[str, np.ndarray]:
         found: dict[str, np.ndarray] = {}
         chunk = 900  # stay under SQLite's default variable limit
-        for i in range(0, len(keys), chunk):
-            block = keys[i : i + chunk]
-            placeholders = ",".join("?" * len(block))
-            rows = self._conn.execute(
-                f"SELECT key, vec FROM vectors WHERE key IN ({placeholders})", tuple(block)
-            ).fetchall()
-            for key, blob in rows:
-                found[key] = np.frombuffer(blob, dtype=np.float32)
+        with self._lock:
+            for i in range(0, len(keys), chunk):
+                block = keys[i : i + chunk]
+                placeholders = ",".join("?" * len(block))
+                rows = self._conn.execute(
+                    f"SELECT key, vec FROM vectors WHERE key IN ({placeholders})", tuple(block)
+                ).fetchall()
+                for key, blob in rows:
+                    found[key] = np.frombuffer(blob, dtype=np.float32)
         return found
 
     def put_many(self, items: Sequence[tuple[str, np.ndarray]]) -> None:
-        self._conn.executemany(
-            "INSERT OR REPLACE INTO vectors (key, vec) VALUES (?, ?)",
-            [(k, np.ascontiguousarray(v, dtype=np.float32).tobytes()) for k, v in items],
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO vectors (key, vec) VALUES (?, ?)",
+                [(k, np.ascontiguousarray(v, dtype=np.float32).tobytes()) for k, v in items],
+            )
+            self._conn.commit()
 
     def __len__(self) -> int:
-        return int(self._conn.execute("SELECT COUNT(*) FROM vectors").fetchone()[0])
+        with self._lock:
+            return int(self._conn.execute("SELECT COUNT(*) FROM vectors").fetchone()[0])
 
     def close(self) -> None:
         self._conn.close()

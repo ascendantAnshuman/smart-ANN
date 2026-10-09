@@ -77,6 +77,18 @@ class ProfileTable:
             return max(fits, key=lambda e: (e.recall, -e.p95_ms))
         return min(self.entries, key=lambda e: e.p95_ms)
 
+    def entry_for(self, nprobe: int) -> ProfileEntry | None:
+        """The measured row for one effort level, or None when it was not measured.
+
+        None rather than the nearest row: a report that named a level and then
+        printed a neighbour's p95 and recall beside it would be describing a
+        configuration nobody ran.
+        """
+        for e in self.entries:
+            if e.nprobe == nprobe:
+                return e
+        return None
+
     def pareto_front(self) -> tuple[ProfileEntry, ...]:
         """Entries not dominated on both latency and recall.
 

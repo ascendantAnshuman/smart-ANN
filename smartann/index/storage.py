@@ -33,6 +33,7 @@ __all__ = [
     "IndexPaths",
     "cluster_kind",
     "memory_model_mb",
+    "resolve_index_root",
 ]
 
 CLUSTER_EMPTY = "empty"
@@ -207,3 +208,40 @@ def memory_model_mb(
     out = {k: v / 2**20 for k, v in terms.items()}
     out["total"] = sum(out.values())
     return out
+
+
+def resolve_index_root(
+    dataset: str,
+    variant: str = "ecovector",
+    config_dir: Path | None = None,
+) -> IndexPaths | None:
+    """The index built from `configs/index/<dataset>_<variant>.yaml`, or None.
+
+    Derived from the config rather than discovered on disk. Picking the
+    lexicographically largest hash, or even the newest mtime, means a caller
+    silently describes whichever artifact happened to sort or land last, which
+    is fine until the first `--force` rebuild and wrong thereafter with no
+    symptom. The config file is what the build was told to do, so it is what
+    resolution should ask about.
+
+    Lives here rather than in `scripts/` because both the acceptance scripts and
+    the library's own query path need it, and two resolvers would eventually
+    disagree about which artifact a result came from.
+
+    Returns None only when the index is genuinely not built. A missing config
+    *directory* is a broken checkout rather than a missing index, and raises.
+    """
+    from smartann.config import config_hash, load_yaml, resolve_paths
+
+    cfg_dir = config_dir or Path(__file__).resolve().parent.parent.parent / "configs" / "index"
+    if not cfg_dir.is_dir():
+        raise FileNotFoundError(
+            f"{cfg_dir} does not exist. Without it every caller would report "
+            "'no index built', which is a misreport rather than a result."
+        )
+    cfg_path = cfg_dir / f"{dataset}_{variant}.yaml"
+    if not cfg_path.exists():
+        return None
+    cfg = load_yaml(cfg_path, IndexBuildConfig)
+    root = resolve_paths().data_root / "index" / dataset / config_hash(cfg)
+    return IndexPaths(root) if (root / "meta.json").exists() else None

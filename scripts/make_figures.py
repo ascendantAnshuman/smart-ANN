@@ -657,6 +657,116 @@ def fig_device(device_json, out) -> None:
     print(f"wrote {out}", flush=True)
 
 
+def fig_thermal_attribution(energy_json, out, prefix: str = "c5_") -> None:
+    """Why the device is hot with the cable out, and which sensor would notice.
+
+    Left: the measured battery draw split into the idle floor, retrieval work
+    and the remainder nobody attributed. Charging is drawn as an explicit zero
+    rather than omitted, because its absence is the whole point -- every sample
+    of this trace was DISCHARGING and the phone still gained 7.8 C.
+
+    Right: both thermometers against the thresholds `DeviceStatePolicy` acts on.
+    The skin, which is the sensor the policy reads, never approaches its 42 C
+    derate line, while the hottest zone spends the entire run above the 46 C
+    shield line. That gap is why C5 recorded a real thermal signal the
+    controller could not act on, and it is a sensor-selection finding rather
+    than a threshold that needs retuning.
+    """
+    from smartann.thermal.attribution import EnergyModel, ThermalModel, attribute, load_trace
+
+    results = Path(energy_json).parent
+    a = attribute(
+        load_trace(results / "device", prefix),
+        EnergyModel.load(Path(energy_json)),
+        ThermalModel.load(results / "thermal_model.json"),
+    )
+    t, p = a.trace, a.power
+
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.4))
+
+    segs = [
+        ("idle floor", p.idle_w, "#7f8c8d"),
+        ("retrieval work", p.work_w, "#c0392b"),
+        ("unattributed", max(p.unexplained_w, 0.0), "#bdc3c7"),
+        ("charging", 0.0, "#2980b9"),
+    ]
+    left = 0.0
+    for label, value, colour in segs:
+        if value <= 0 and label != "charging":
+            continue
+        ax.barh(
+            [0],
+            [value],
+            left=[left],
+            color=colour,
+            edgecolor="white",
+            label=f"{label}  {value:.2f} W",
+        )
+        # Only a wide enough segment carries inline text. A narrow one overruns
+        # its own bar and reads as a clipped word rather than a number.
+        if value > 0.25:
+            ax.text(
+                left + value / 2,
+                0,
+                f"{value:.2f} W",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="white",
+                weight="bold",
+            )
+        left += value
+
+    ax.set_xlim(0, max(left, p.measured_mean_w) * 1.02)
+    ax.set_ylim(-0.6, 0.9)
+    ax.set_yticks([])
+    ax.set_xlabel("battery power draw (W), measured")
+    ax.set_title(f"Where the heat comes from -- trace {t.name}, cable OUT", fontsize=10)
+    ax.grid(axis="y", visible=False)
+    ax.legend(fontsize=8, loc="lower left", ncol=2, frameon=False)
+    ax.text(
+        0.0,
+        0.62,
+        f"CONTROLLABLE HEAT SCORE   {a.score:.0f} / 100",
+        fontsize=11,
+        weight="bold",
+        color="#c0392b",
+    )
+    ax.text(
+        0.0,
+        0.42,
+        "share of measured draw that retrieval effort controls;\n"
+        "unattributed power counts against it, not for it",
+        fontsize=7.5,
+        color="#555",
+    )
+
+    mins = t.t_s / 60.0
+    ax2.plot(mins, t.hottest_c, color="#c0392b", lw=1.3, label="hottest zone (SoC)")
+    ax2.plot(mins, t.skin_c, color="#2980b9", lw=1.6, label="skin (what the policy reads)")
+    ax2.axhline(46.0, color="#e67e22", ls="--", lw=1.0)
+    ax2.axhline(42.0, color="#f1c40f", ls="--", lw=1.0)
+    ax2.text(mins[0], 46.4, "shield 46 C", ha="left", fontsize=7.5, color="#e67e22")
+    ax2.text(mins[0], 42.4, "derate 42 C", ha="left", fontsize=7.5, color="#b7950b")
+    ax2.set_xlabel("minutes")
+    ax2.set_ylabel("temperature (C)")
+    ax2.set_title("Two thermometers, one policy, and a gap", fontsize=10)
+    ax2.legend(fontsize=8, loc="upper right", framealpha=0.95)
+    ax2.annotate(
+        f"skin peaks {t.skin_c.max():.1f} C -- never trips either line\n"
+        f"SoC peaks {t.hottest_max_c:.1f} C -- above both, throughout",
+        xy=(0.03, 0.05),
+        xycoords="axes fraction",
+        fontsize=7.5,
+        bbox={"boxstyle": "round", "fc": "#fdebd0", "ec": "#999"},
+    )
+
+    fig.tight_layout()
+    fig.savefig(out)
+    plt.close(fig)
+    print(f"wrote {out}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", default=None, help="directory holding static/ and aimd/")
@@ -697,6 +807,7 @@ def main() -> int:
         "scr_quality",
         "joint",
         "device",
+        "thermal_attribution",
     }
     wanted = set(args.only) if args.only else all_figures
     unknown = wanted - all_figures
@@ -722,6 +833,7 @@ def main() -> int:
         ("scr_quality", fig_scr_quality, out.parent / "phase7" / "qa_summary.json"),
         ("joint", fig_joint, out.parent / "phase8" / "joint_summary.json"),
         ("device", fig_device, out.parent / "energy_model.json"),
+        ("thermal_attribution", fig_thermal_attribution, out.parent / "energy_model.json"),
     ):
         if name not in wanted:
             continue

@@ -435,7 +435,239 @@ thermal load. That is a different experiment, not a longer one.
 
 ---
 
-## 8. The figures
+## 8. `phase2_acceptance.py` — the 15 index checks
+
+The output ends with a PASS/FAIL line per check and writes
+`results/phase2_summary.json`. Fourteen pass, one fails, and the failure is a
+NYTimes dataset property rather than a defect (section 9).
+
+**`check2`** — six rows of `nprobe`, `ef_list`, `ms`, `recall`. This is the
+recall/latency curve the profile table is later built from. It is the evidence
+that effort is a real dial: recall moves with `nprobe`, and so does time.
+
+**`check5`** — resident footprint, in MB:
+
+```
+sift1m    12.0078
+nytimes   40.8086
+```
+
+Measured in a *fresh process*. The same index reads 5.18 MB or 38.24 MB
+depending on what ran before it, so a footprint taken in a warm process is a
+measurement of the process, not of the index. SIFT1M landing within 1.24x of
+MobileRAG's published 9.67 MB is the cheapest independent evidence that the
+index is built correctly.
+
+**`machine_load`** — the guard that decides whether the timings mean anything:
+
+```
+n                        435     samples taken across the whole run
+median                   0.149
+p95                      0.285
+max                      0.464
+fraction_over_threshold  0.0897
+contaminated             False
+```
+
+`fraction_over_threshold` is the share of samples where the machine was busier
+than the limit. 8.97% is under the 10% ceiling, so the run stands — but only
+just. If this crosses 0.10 the script exits 2 and the durations are discarded
+rather than reported. Sampling only at t=0 was ADR-0048's bug: a game launched
+thirty seconds in would have passed.
+
+---
+
+## 9. `regime_summary.json` — why per-cluster graphs lose
+
+This is the project's principal finding, and the numbers are small enough to
+read directly.
+
+MobileRAG's condition for preferring per-cluster proximity graphs is
+`ef_L * M' < N/Nc`. For SIFT1M the right-hand side is **4000**, so the
+condition holds by a wide margin and graphs should win comfortably.
+
+Milliseconds at four matched recall points:
+
+```
+                        ~0.65    ~0.82    ~0.92    ~0.98   recall
+ivf_disk (flat)          8.46   112.41   114.14    51.93
+per-cluster graphs M=16 22.28   235.41   292.52   138.13
+per-cluster graphs M=32 29.90   258.36   305.54   143.63
+```
+
+Recall is essentially identical across all three (0.6487–0.6507 at the first
+point, 0.9783–0.9807 at the last), so this is a like-for-like comparison. Flat
+arrays win everywhere, by roughly 2.5–2.8x.
+
+The graphs *do* save distance comparisons exactly as predicted — 2,298 against
+8,784 at the first point. They still lose, because the published condition
+counts comparisons and prices cluster access as pure I/O, while measurement
+attributes 95–99% of load cost to **deserialisation**, a term the model does
+not contain. Materialising a graph structure costs far more than materialising
+a flat array. This is why cluster payloads in this project are flat and
+memory-mapped.
+
+---
+
+## 10. `phase6/policy_comparison.json` — the three policies (C1)
+
+```
+budget_ms  14.0116
+derivation p95 of the median swept level (nprobe=12), fixed from the
+           profile table BEFORE any policy ran
+```
+
+The budget being fixed in advance matters: a budget chosen after seeing the
+results would let any policy be made to look good.
+
+```
+policy   n       p50_ms  p95_ms  viol%   recall  nprobe_p50  overhead_p95%
+static   7228    11.88   14.20    5.98   0.8480      12        0.0061
+aimd     8790    10.07   13.44    4.31   0.8103      10        0.1314
+budget  10681     7.98    9.51    0.17   0.7797       8        0.1674
+```
+
+Read it as a trade, not a ranking. `budget` is the only arm that essentially
+holds the target (0.17%), and it pays 0.068 recall against static to do it.
+`aimd` sits between the two on every column.
+
+`overhead_p95%` is the controller's own cost as a share of query latency. Even
+the most expensive policy spends 0.17% of the query deciding what to do, so
+none of the differences above are the controller taxing itself.
+
+`honours_energy_budget` is `False` for all three, and that is correct — this
+platform cannot measure energy, so no policy is permitted to claim it respects
+an energy budget. The field is per-instance and earns its `True` only from a
+live energy source.
+
+---
+
+## 11. `figures/headline_stats.json` — the collapse (C1, the negative result)
+
+Three phases run in sequence: quiet, then contended, then recovery. The target
+tightens under contention by design (33.36 ms quiet, 16.68 ms contended),
+because the point is to see what each policy does when the budget gets hard.
+
+```
+              n       target   viol%    recall   nprobe_p50  overhead_p95%
+static
+  quiet      3473     33.36     0.66    0.8821       16          0.0049
+  contended  7274     16.68    28.17    0.8805       16          0.0051
+  recovery   3660     33.36     0.08    0.8813       16          0.0050
+
+aimd
+  quiet      8591     33.36     6.09    0.4643        1          0.6345
+  contended 31731     16.68     6.27    0.4079        1          0.6440
+  recovery   8820     33.36     5.62    0.4665        1          0.6212
+```
+
+The contended row is the intended result: 28.17% down to 6.27%.
+
+Everything else on the `aimd` rows is the finding. Look at `nprobe_p50`: it is
+**1 in all three phases**, including quiet, where there is no disturbance at
+all. The policy sat at its floor throughout, missed the target more often than
+static did in the quiet phase (6.09% against 0.66%), and gave up 0.418 recall
+for nothing.
+
+The `recovery` row is the confirmation. Static returns to 0.08% once the
+disturbance is removed. `aimd` stays at 5.62% and never climbs back. A working
+controller recovers; this one has no path back up.
+
+The cause is structural, not a tuning error: the control period was shorter
+than the observation delay, so the policy acted again before its previous
+action could appear in the statistic it was reading. Every action looked
+ineffective, so it decreased monotonically to the floor. Section 5 measures
+that delay at 68 s.
+
+---
+
+## 12. `phase7/qa_summary.json` — answer quality (C2)
+
+1000 SQuAD questions, k=5, nprobe=8. Retrieval is run **once** and shared
+across all four arms, so the arms differ only in the reduction setting.
+
+```
+arm        EM     F1     tokens  reduce%  scr_ms   gen_ms  trunc%
+off       .606   .6769   570.9     0.0      7.17   650.06    0.1
+keep1_ext .595   .6661   475.2    19.4      8.06   536.24    0.0
+keep2     .585   .6569   447.6    25.2    721.34   514.11    0.0
+keep1     .511   .5824   269.3    61.4      7.94   346.16    0.0
+```
+
+**`scr_ms` for `keep2` is 721 ms and the others are ~8 ms.** This is not a
+property of `keep2`. It is the arm that ran first after the window embeddings
+were cold; every later arm hit a warm cache. The honest reading is that
+reduction costs ~721 ms when it must compute window embeddings on the query
+path and ~8 ms when they already exist. Since the corpus is static they can be
+precomputed at index time — the difference between a stage that costs more
+than it saves and one that clearly pays.
+
+Paired bootstrap against `off`, 10,000 resamples:
+
+```
+arm        d_EM     95% CI            sig?    d_F1      95% CI              sig?
+keep1_ext -0.011  [-0.022, +0.000]     no   -0.0108  [-0.0212, -0.0009]     yes
+keep2     -0.021  [-0.034, -0.008]    yes   -0.0200  [-0.0329, -0.0083]     yes
+keep1     -0.095  [-0.118, -0.073]    yes   -0.0945  [-0.1154, -0.0740]     yes
+```
+
+Note the split on `keep1_ext`: the F1 loss is significant, the EM loss is not
+— its interval touches zero. F1 is the more sensitive metric because it gives
+partial credit, so it detects a degradation that exact-match cannot resolve at
+n=1000. Report both; claiming `keep1_ext` is free because EM did not move
+would be reading only the less sensitive of the two.
+
+`truncated%` near zero matters. If prompts were being silently cut at the token
+limit, a "reduction did not hurt quality" result could simply mean both arms
+were truncated to the same length. They were not.
+
+---
+
+## 13. `phase8/joint_summary.json` — joint control (C3)
+
+A 3x3 grid of nprobe against reduction level, 250 questions, cells
+**interleaved** rather than run in blocks. Blocked ordering is what produced
+the false "C3 SUPPORTED" verdict earlier: baselines measured last were slowest
+because the host had drifted, not because of the setting.
+
+```
+declared_test: a joint cell supports C3 if NO single-dimension cell dominates
+               it on both quality and cost
+cost_axis:     t_retrieve_ms + t_generate_ms  (SCR's own cost EXCLUDED)
+```
+
+The excluded SCR cost is a stated caveat, not an oversight — it is the ~8 ms
+warm figure from section 12, and including the cold 721 ms would price a
+one-off cache miss into every cell.
+
+```
+best_retrieval_only   nprobe=16, scr=off   EM .648  F1 .7134  1062.83 ms
+best_reduction_only   nprobe=16, scr=off   EM .648  F1 .7134  1062.83 ms
+```
+
+**These two are the same cell**, and that is informative. The best
+"reduction-only" configuration is the one with reduction turned *off* —
+reduction never improved quality at any level, consistent with section 12.
+
+```
+joint_cells_on_pareto_front            3
+joint_cells_dominating_both_bests      0
+```
+
+Three joint cells are undominated, so by the declared test C3 is supported.
+But the second line is the honest qualifier: **no** joint cell beats the best
+single-dimension cell outright. Joint control does not raise the ceiling — the
+highest quality is still retrieval-only at maximum effort. What it does is
+extend the frontier *downward in cost*, into operating points neither dimension
+reaches alone, which is the region a controller occupies under pressure.
+
+`ms_per_token` (1.81 at the best cell) is the drift gate: if this varies more
+than 1.25x across cells, generation speed changed during the run and the cost
+comparison is measuring the host rather than the settings.
+
+---
+
+## 14. The figures
 
 | File | What it shows |
 |---|---|
@@ -449,7 +681,7 @@ thermal load. That is a different experiment, not a longer one.
 
 ---
 
-## 9. Two things that look wrong and are not
+## 15. Two things that look wrong and are not
 
 **`phase 2 acceptance` exits 1.** One NYTimes check genuinely fails as a
 dataset property. A verification demanding exit 0 there could only be satisfied
@@ -460,7 +692,7 @@ a real limitation with an identified cause, and it is the reason the budget
 policy reads measurements instead of predictions. Deleting the failing number
 would remove the evidence for a design decision.
 
-## 10. One thing that looks fine and is not
+## 16. One thing that looks fine and is not
 
 **A command that prints nothing.** For thirty-nine commits
 `python -m smartann.cli <anything>` imported the module, ran nothing, and
