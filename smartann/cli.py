@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
+from click import exceptions as click_exceptions
 
 if TYPE_CHECKING:  # heavy imports stay out of CLI startup
     import numpy as np
@@ -41,12 +42,16 @@ index_app = typer.Typer(name="index", help="Build and inspect EcoVector indexes.
 config_app = typer.Typer(name="config", help="Inspect and hash configuration files.")
 run_app = typer.Typer(name="run", help="Execute benchmark experiments.")
 figures_app = typer.Typer(name="figures", help="Regenerate figures from stored parquet.")
+thermal_app = typer.Typer(name="thermal", help="Explain and score device heat from a trace.")
+kb_app = typer.Typer(name="kb", help="Grow the knowledge base that ask searches beside SQuAD.")
 
 app.add_typer(data_app)
 app.add_typer(index_app)
 app.add_typer(config_app)
 app.add_typer(run_app)
 app.add_typer(figures_app)
+app.add_typer(thermal_app)
+app.add_typer(kb_app)
 
 
 @app.command()
@@ -618,6 +623,641 @@ def figures_make(
     if runs is not None:
         argv += ["--runs", str(runs)]
     raise typer.Exit(subprocess.run(argv, check=False).returncode)
+
+
+# Printed once when `ask` runs with no question. Short on purpose: the panel
+# that follows each answer is long, and a wall of help above it would push the
+# first answer off the screen during a demo.
+_ASK_BANNER = """
+  Type a question and press Enter. 'quit' ends the session.
+  The models stay loaded, so every question after the first is fast.
+"""
+
+
+def _open_replay(name: str, sensor: str) -> Any:
+    """A recorded handset trace, or a message naming what is on disk instead."""
+    from smartann.telemetry.replay import ReplayFeed, available_traces, load_trace, trace_path
+
+    device_dir = Path(resolve_paths().results_root) / "device"
+    if not device_dir.is_dir():
+        device_dir = Path("results") / "device"
+    path = trace_path(device_dir, name)
+    if not path.exists():
+        have = available_traces(device_dir) or ["none on disk"]
+        typer.echo(
+            f"no recorded trace named {name!r} in {device_dir}. Have: {', '.join(have)}", err=True
+        )
+        raise typer.Exit(2)
+    return ReplayFeed(load_trace(path, sensor=sensor))
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(None, help="A question in quotes; omit it to type questions."),
+    budget_ms: float = typer.Option(
+        None, "--budget-ms", help="Latency budget the controller honours."
+    ),
+    nprobe: int = typer.Option(8, help="Effort level, when no budget is given."),
+    k: int = typer.Option(5, help="Chunks to retrieve."),
+    dataset: str = typer.Option("squad", help="Which built index to answer from."),
+    scr: bool = typer.Option(False, "--scr", help="Turn context reduction on."),
+    top_windows: int = typer.Option(2, help="Windows kept per chunk when --scr is set."),
+    table: Path = typer.Option(
+        Path("results/device_profile_table.json"),
+        help="Measured profile table; must name the same dataset.",
+    ),
+    show_context: bool = typer.Option(True, help="Print the retrieved passages."),
+    json_out: Path = typer.Option(None, help="Also write the full result as JSON."),
+    model: str = typer.Option(
+        "google/flan-t5-base",
+        help="Generator. google/flan-t5-large is larger and slower; not benchmarked here.",
+    ),
+    verify: bool = typer.Option(
+        True, help="Withhold a span unless the model judges the passages contain the answer."
+    ),
+    fallback: bool = typer.Option(
+        False,
+        "--fallback",
+        help="When the corpus cannot answer, ask the model from memory. Measured: flan-t5-base "
+        "got 4 of 4 test questions wrong this way.",
+    ),
+    replay: str = typer.Option(
+        None,
+        "--replay",
+        help="Drive the controller from a recorded handset trace, e.g. c5. "
+        "Each question advances along it, so the device warms as you ask.",
+    ),
+    sensor: str = typer.Option(
+        "hottest",
+        "--sensor",
+        help="Which thermometer the policy reads: hottest (inside) or skin (the case).",
+    ),
+    query_adaptive: bool = typer.Option(
+        False,
+        "--query-adaptive",
+        help="Spend effort by measured query difficulty (C6). Needs a phase 9 fit at "
+        "this exact budget; run scripts/phase9_query_adaptive.py first.",
+    ),
+    fit_path: Path = typer.Option(
+        Path("results/phase9/query_adaptive.json"),
+        help="The recorded phase 9 allocation --query-adaptive spends.",
+    ),
+    explain: bool = typer.Option(
+        False,
+        "--explain",
+        help="Print the query trace as a step-by-step story instead of the report: "
+        "question, device, controller decision, clusters opened, passages, answer, cost.",
+    ),
+    no_kb: bool = typer.Option(
+        False,
+        "--no-kb",
+        help="Answer from the index alone, ignoring the knowledge base. Use it when a "
+        "demonstration must show one corpus and not a merge of two.",
+    ),
+    trace_dir: Path = typer.Option(
+        Path("traces"),
+        help="Where each query's trace JSON is written. Every query writes one.",
+    ),
+    no_trace: bool = typer.Option(False, "--no-trace", help="Do not write trace files."),
+    guard: bool = typer.Option(
+        True,
+        "--guard/--no-guard",
+        help="Refuse to answer when the best passage scores below the calibrated "
+        "threshold, instead of guessing. Needs a threshold measured for THIS dataset; "
+        "without one the guard stays off and says so.",
+    ),
+    guard_path: Path = typer.Option(
+        Path("results/grounding_threshold.json"),
+        help="Calibrated refusal threshold, from scripts/phase12_calibrate.py.",
+    ),
+    cache: bool = typer.Option(
+        False,
+        "--cache/--no-cache",
+        help="Reuse the answer to a question already asked in other words. Off by "
+        "default: a reused answer hides whatever the controller would have done.",
+    ),
+    cache_path: Path = typer.Option(
+        Path("results/cache_threshold.json"),
+        help="Calibrated query-similarity threshold for the cache.",
+    ),
+    stress: str = typer.Option(
+        None,
+        "--stress",
+        help="Inject a named device condition: normal, hot, hot-44, low-battery, "
+        "battery-saver. Measured ones come from a recorded trace; the rest are "
+        "labelled hypothetical. Overrides --replay.",
+    ),
+) -> None:
+    """Answer a question end to end, showing what each stage decided and cost.
+
+    Retrieval alone returns passages; this returns an answer, and prints the
+    controller's choice, the evidence and the per-stage cost alongside it. It
+    drives the same objects Phase 7 scores, so an answer here and an answer in
+    the C2 results come from one implementation rather than two.
+
+    Recall is not reported for a typed question. There is no ground truth for
+    one, and the profile table's recall describes the effort level over the
+    benchmark set rather than this query (Section 3, rule 1).
+    """
+    from smartann.pipeline.ask import SCR_OFF, RagPipeline
+    from smartann.pipeline.ask_report import render
+    from smartann.pipeline.explain import render_story
+    from smartann.pipeline.querytrace import NetworkWitness, doc_slugs, from_ask_result
+    from smartann.telemetry.provenance import device_evidence
+    from smartann.types import ScrConfig
+
+    # SQuAD carries IPA pronunciation guides, and a Windows console defaults to
+    # cp1252, which cannot encode them. Without this the whole answer is lost to
+    # a UnicodeEncodeError after the work has already been done.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+    from smartann.telemetry.replay import SENSORS
+
+    if sensor not in SENSORS:
+        typer.echo(f"--sensor must be one of {', '.join(SENSORS)}", err=True)
+        raise typer.Exit(2)
+    feed = _open_replay(replay, sensor) if replay else None
+
+    # 12.3: a named condition pins the device state for every question asked,
+    # which is what makes a live demonstration of the controller possible. It
+    # takes precedence over a replay, because a replay advances and a stress
+    # mode is meant to hold still.
+    stress_mode = None
+    if stress is not None:
+        from smartann.telemetry.stress import load_modes
+
+        device_dir = Path(resolve_paths().results_root) / "device"
+        if not device_dir.is_dir():
+            device_dir = Path("results") / "device"
+        modes = load_modes(device_dir)
+        if stress not in modes:
+            typer.echo(f"--stress must be one of {', '.join(modes)}; got {stress!r}", err=True)
+            raise typer.Exit(2)
+        stress_mode = modes[stress]
+        if feed is not None:
+            typer.echo("NOTE: --stress overrides --replay; the state will not advance.", err=True)
+            feed = None
+        typer.echo(f"stress mode {stress!r}: {stress_mode.detail}", err=True)
+
+    the_guard = None
+    if guard:
+        from smartann.pipeline.guard import GroundingGuard
+
+        if not guard_path.exists():
+            typer.echo(
+                f"NOTE: no calibrated threshold at {guard_path}, so the grounding guard "
+                f"is OFF. Run scripts/phase12_calibrate.py to measure one.",
+                err=True,
+            )
+        else:
+            try:
+                the_guard = GroundingGuard.load(guard_path, dataset=dataset)
+            except ValueError as exc:
+                typer.echo(f"NOTE: grounding guard OFF -- {exc}", err=True)
+
+    the_cache: Any = None
+    if cache:
+        from smartann.pipeline.cache import SemanticCache
+
+        threshold = 0.95
+        if cache_path.exists():
+            threshold = float(json.loads(cache_path.read_text(encoding="utf-8"))["threshold"])
+        else:
+            typer.echo(
+                f"NOTE: no calibrated threshold at {cache_path}; falling back to "
+                f"{threshold}, which is a guess and not a measurement.",
+                err=True,
+            )
+        the_cache = SemanticCache(threshold=threshold)
+
+    qfit = None
+    if query_adaptive:
+        from smartann.controller.policies.query import QueryEffortFit
+
+        if budget_ms is None:
+            typer.echo("--query-adaptive needs --budget-ms: the fit is per budget.", err=True)
+            raise typer.Exit(2)
+        try:
+            qfit = QueryEffortFit.load(fit_path, budget_ms=budget_ms, dataset=dataset)
+        except (OSError, ValueError, KeyError) as exc:
+            typer.echo(f"cannot use the query-difficulty fit: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if not qfit.is_demonstrated:
+            # Loadable, because a negative result must stay inspectable. Said
+            # out loud, because nobody should demo a policy whose own held-out
+            # comparison recorded no gain without knowing that.
+            typer.echo(
+                f"NOTE: this fit demonstrated nothing on its held-out half "
+                f"(delta recall {qfit.delta_recall:+.4f}, cost saving "
+                f"{100 * qfit.cost_saving:.1f}%). Running it anyway.",
+                err=True,
+            )
+        if replay:
+            typer.echo(
+                "NOTE: --replay takes precedence; device state overrides query difficulty.",
+                err=True,
+            )
+
+    cfg = ScrConfig(1, 0, 0, top_windows, 0.0, enabled=True) if scr else SCR_OFF
+    pipeline = RagPipeline(
+        dataset=dataset,
+        k=k,
+        profile_table_path=table,
+        model_id=model,
+        use_kb=not no_kb,
+    )
+
+    try:
+        typer.echo("loading index, embedder and generator ...", err=True)
+        pipeline.load()
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        pipeline.close()
+        typer.echo(f"cannot answer: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    # Loading costs about thirty seconds, almost all of it the generator. Paying
+    # that once and then answering many questions is the only reason an
+    # interactive mode is worth having over repeated one-shot invocations.
+    answers = []
+    traces: list[Any] = []
+    written: list[Path] = []
+    # chunk -> document slug, read once. The trace cites documents, and the
+    # retrieved chunk carries only a chunk id.
+    slug_map = doc_slugs(Path(resolve_paths().data_root) / "processed" / dataset / "chunks.sqlite")
+    # Computed once per session, not per query: scanning the recorded handset
+    # runs costs tens of milliseconds and the answer does not change between
+    # questions.
+    _device_dir = Path(resolve_paths().results_root) / "device"
+    if not _device_dir.is_dir():
+        _device_dir = Path("results") / "device"
+    evidence = device_evidence(_device_dir, Path("results/device_profile_table.json"))
+
+    def _ask(text: str) -> Any:
+        """One question, with the next measured device state when replaying.
+
+        The network witness wraps the whole query rather than any one stage,
+        because the claim being checked is about the query: that answering it
+        sent nothing anywhere. A witness around retrieval alone would miss a
+        generator that called home.
+        """
+        if stress_mode is not None:
+            state, label = stress_mode.state, stress_mode.label
+        elif feed is not None:
+            state, label = feed.next()
+        else:
+            state, label = None, ""
+        with NetworkWitness() as witness:
+            result = pipeline.ask(
+                text,
+                budget_ms=budget_ms,
+                nprobe=nprobe,
+                scr=cfg,
+                verify=verify,
+                fallback=fallback,
+                device=state,
+                device_source=label,
+                # A stress mode may be a typed hypothetical. Carrying it as
+                # measured would put an invented temperature into a trace as a
+                # reading, which is the one thing nothing here may do.
+                device_is_measured=(
+                    stress_mode.is_measured if stress_mode is not None else state is not None
+                ),
+                query_fit=qfit,
+                guard=the_guard,
+                cache=the_cache,
+            )
+        trace = from_ask_result(
+            result,
+            network_bytes_sent=witness.bytes_sent,
+            network_connections=witness.connections,
+            doc_ids=slug_map,
+        )
+        traces.append(trace)
+        if not no_trace:
+            written.append(trace.write(trace_dir))
+        return result
+
+    try:
+        if question is not None:
+            answers.append(_ask(question))
+            typer.echo(
+                render_story(traces[-1], evidence)
+                if explain
+                else render(answers[-1], show_context=show_context)
+            )
+        else:
+            typer.echo(_ASK_BANNER)
+            while True:
+                try:
+                    typed = typer.prompt("ask", prompt_suffix="> ").strip()
+                except (EOFError, click_exceptions.Abort):
+                    typer.echo("\nbye.")
+                    break
+                if typed.lower() in {"quit", "exit", ":q"}:
+                    typer.echo("bye.")
+                    break
+                if not typed:
+                    continue
+                try:
+                    answers.append(_ask(typed))
+                except (RuntimeError, ValueError) as exc:
+                    # One bad question must not end the session; the models are
+                    # loaded and re-entering costs another thirty seconds.
+                    typer.echo(f"cannot answer that: {exc}", err=True)
+                    continue
+                typer.echo(
+                    render_story(traces[-1], evidence)
+                    if explain
+                    else render(answers[-1], show_context=show_context)
+                )
+    finally:
+        pipeline.close()
+
+    if written:
+        label = "traces" if len(written) > 1 else "trace"
+        typer.echo(f"\n{label}: " + ", ".join(str(w) for w in written[-3:]), err=True)
+
+    if json_out is not None and answers:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        payload = [a.as_dict() for a in answers]
+        json_out.write_text(
+            json.dumps(payload[0] if len(payload) == 1 else payload, indent=2), encoding="utf-8"
+        )
+        typer.echo(f"\nwrote {json_out}")
+
+
+@app.command()
+def dashboard(
+    out: Path = typer.Option(Path("results/dashboard.html"), help="Where to write the page."),
+    results: Path = typer.Option(Path("results"), help="Directory holding the result files."),
+    prefix: str = typer.Option("c5_", help="Device trace to attribute heat from."),
+    answers: Path = typer.Option(None, help="JSON written by `smartann ask --json-out`."),
+    open_it: bool = typer.Option(False, "--open", help="Open the page in a browser."),
+) -> None:
+    """Build one self-contained HTML page from every result on disk.
+
+    No value is typed by hand: each is read from the same JSON the figures and
+    the paper read, so the page cannot drift from the results it describes. A
+    section whose input is missing renders as *not run* rather than vanishing,
+    because "we measured this and it was small" and "we never measured this"
+    must not look the same (Section 3, rule 1).
+    """
+    from smartann.dashboard import collect
+    from smartann.dashboard_html import render_html
+
+    state = collect(results=results, thermal_prefix=prefix, answers_path=answers)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_html(state), encoding="utf-8")
+
+    size_kb = out.stat().st_size / 1024
+    typer.echo(f"wrote {out}  ({size_kb:,.0f} KB, self-contained)")
+    if state.missing:
+        typer.echo(f"sections with no input, shown as not run: {', '.join(state.missing)}")
+    if open_it:
+        import webbrowser
+
+        webbrowser.open(out.resolve().as_uri())
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(8000, help="Port on 127.0.0.1."),
+    budget_ms: float = typer.Option(
+        120.0, "--budget-ms", help="Latency budget used when the page does not pick one."
+    ),
+    dataset: str = typer.Option("squad", help="Which built index to answer from."),
+    model: str = typer.Option("google/flan-t5-base", help="Generator."),
+    table: Path = typer.Option(
+        Path("results/device_profile_table.json"), help="Measured profile table."
+    ),
+    open_it: bool = typer.Option(True, "--open/--no-open", help="Open a browser."),
+) -> None:
+    """Serve the ask page and the dashboard at http://127.0.0.1:8000.
+
+    Loopback only: the page runs a local model over a local index, and putting
+    that on a shared network would let anyone on it spend this machine's CPU.
+    One question is answered at a time, so every latency reported is a query
+    that ran alone.
+    """
+    import webbrowser
+
+    from smartann.dashboard import collect
+    from smartann.dashboard_html import render_html
+    from smartann.pipeline.ask import RagPipeline
+    from smartann.web import SingleThreadPipeline, TraceCatalog
+    from smartann.web import serve as serve_http
+
+    # Loaded and called on one worker thread: the embedding cache is a SQLite
+    # connection, and SQLite refuses one used from a thread other than the one
+    # that opened it. Requests arrive on their own threads.
+    runner = SingleThreadPipeline(
+        RagPipeline(dataset=dataset, profile_table_path=table, model_id=model),
+        default_budget_ms=budget_ms,
+    )
+    try:
+        typer.echo("loading index, knowledge base, embedder and generator ...")
+        runner.load()
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        typer.echo(f"cannot start: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    catalog = TraceCatalog(Path("results") / "device")
+    if catalog.names:
+        typer.echo(f"recorded handset traces the page can replay: {', '.join(catalog.names)}")
+    else:
+        typer.echo("no recorded handset traces found; the page will offer this host only")
+
+    httpd = serve_http(runner, lambda: render_html(collect()), port=port, traces=catalog)
+    url = f"http://127.0.0.1:{port}/"
+    typer.echo(f"ready at {url}   (Ctrl+C to stop)")
+    if open_it:
+        webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        typer.echo("stopped.")
+    finally:
+        httpd.server_close()
+        runner.close()
+
+
+# ---------------------------------------------------------------------------
+# knowledge base
+# ---------------------------------------------------------------------------
+# A curated starter set, chosen to cover the kinds of question a demo audience
+# asks first and SQuAD's 2016 snapshot cannot answer: current office-holders,
+# recent events, and everyday facts SQuAD never had an article for.
+KB_STARTER = (
+    "Google",
+    "Alphabet Inc.",
+    "Microsoft",
+    "Apple Inc.",
+    "OpenAI",
+    "Cricket",
+    "Association football",
+    "2022 FIFA World Cup",
+    "India",
+    "Artificial intelligence",
+    "Large language model",
+    "Retrieval-augmented generation",
+    "Nearest neighbor search",
+    "Smartphone",
+    "Lithium-ion battery",
+)
+
+
+def _kb_open() -> Any:
+    from smartann.kb import KnowledgeBase
+
+    return KnowledgeBase(Path(resolve_paths().data_root) / "kb")
+
+
+def _kb_embedder() -> Any:
+    from smartann.pipeline.embedder import Embedder
+
+    return Embedder(cache_path=Path(resolve_paths().data_root) / "cache" / "kb.sqlite")
+
+
+@kb_app.command("add-wiki")
+def kb_add_wiki(
+    titles: list[str] = typer.Argument(None, help="Wikipedia article titles."),
+    starter: bool = typer.Option(False, "--starter", help="Add the curated starter set."),
+) -> None:
+    """Fetch Wikipedia articles and add them to the knowledge base.
+
+    Each article is chunked exactly like SQuAD (three-sentence windows, one of
+    overlap) and embedded with the same model, so its passages compete with the
+    benchmark's on equal terms. The SQuAD index itself is never modified, so
+    every recorded benchmark number stays reproducible.
+    """
+    from smartann.kb import fetch_wikipedia
+
+    wanted = list(titles or []) + (list(KB_STARTER) if starter else [])
+    if not wanted:
+        typer.echo("give one or more titles, or --starter", err=True)
+        raise typer.Exit(2)
+
+    kb, emb = _kb_open(), _kb_embedder()
+    failed = []
+    try:
+        for title in wanted:
+            try:
+                canonical, url, paras = fetch_wikipedia(title)
+                info = kb.add(canonical, paras, url, "wikipedia", emb.encode)
+            except (LookupError, ConnectionError, ValueError) as exc:
+                failed.append(title)
+                typer.echo(f"  skipped  {title}: {exc}", err=True)
+                continue
+            typer.echo(f"  added    {info.title:<34} {info.n_chunks:>5} chunks")
+    finally:
+        typer.echo(f"knowledge base now holds {len(kb):,} chunks from {len(kb.sources())} sources")
+        kb.close()
+    if failed:
+        raise typer.Exit(1)
+
+
+@kb_app.command("add-file")
+def kb_add_file(
+    paths_in: list[Path] = typer.Argument(..., help="Text or Markdown files, or folders of them."),
+) -> None:
+    """Add your own .txt or .md documents to the knowledge base."""
+    from smartann.kb import read_text_file
+
+    files: list[Path] = []
+    for p in paths_in:
+        if p.is_dir():
+            files += sorted(q for q in p.rglob("*") if q.suffix.lower() in {".txt", ".md"})
+        else:
+            files.append(p)
+
+    kb, emb = _kb_open(), _kb_embedder()
+    failed = []
+    try:
+        for f in files:
+            try:
+                title, url, paras = read_text_file(f)
+                info = kb.add(title, paras, url, "file", emb.encode)
+            except (FileNotFoundError, ValueError) as exc:
+                failed.append(f)
+                typer.echo(f"  skipped  {f}: {exc}", err=True)
+                continue
+            typer.echo(f"  added    {info.title:<34} {info.n_chunks:>5} chunks")
+    finally:
+        typer.echo(f"knowledge base now holds {len(kb):,} chunks from {len(kb.sources())} sources")
+        kb.close()
+    if failed:
+        raise typer.Exit(1)
+
+
+@kb_app.command("list")
+def kb_list() -> None:
+    """Show every document in the knowledge base."""
+    kb = _kb_open()
+    try:
+        srcs = kb.sources()
+        if not srcs:
+            typer.echo("knowledge base is empty; try `smartann kb add-wiki --starter`")
+            return
+        for s in srcs:
+            typer.echo(f"  {s.title:<36} {s.kind:<10} {s.n_chunks:>5} chunks   added {s.added_at}")
+        typer.echo(f"{len(kb):,} chunks from {len(srcs)} sources")
+    finally:
+        kb.close()
+
+
+@kb_app.command("remove")
+def kb_remove(title: str = typer.Argument(..., help="Exact title as shown by `kb list`.")) -> None:
+    """Remove a document from the knowledge base."""
+    kb = _kb_open()
+    try:
+        n = kb.remove(title)
+        typer.echo(
+            f"removed {n} source(s) titled '{title}'" if n else f"no source titled '{title}'"
+        )
+    finally:
+        kb.close()
+    if not n:
+        raise typer.Exit(1)
+
+
+@thermal_app.command("explain")
+def thermal_explain(
+    prefix: str = typer.Option("c5_", help="Trace file prefix, e.g. c4_ or c5_."),
+    trace_dir: Path = typer.Option(Path("results/device"), help="Where the trace files live."),
+    energy_model: Path = typer.Option(Path("results/energy_model.json")),
+    thermal_model: Path = typer.Option(Path("results/thermal_model.json")),
+    json_out: Path = typer.Option(None, help="Also write the attribution as JSON."),
+) -> None:
+    """Explain why the device got hot, and score how much of it retrieval controls.
+
+    Answers the question the cable makes obvious: the phone is warm and nothing
+    is charging it, so what is? Splits the measured battery draw into the idle
+    floor, the retrieval workload, and whatever neither accounts for.
+
+    Every input is a measurement. A missing trace or an energy fit that declared
+    itself unreportable stops the command rather than producing a number
+    (Section 3, rule 1).
+    """
+    from smartann.thermal.attribution import EnergyModel, ThermalModel, attribute, load_trace
+    from smartann.thermal.report import render
+
+    try:
+        trace = load_trace(trace_dir, prefix)
+        em = EnergyModel.load(energy_model)
+        tm = ThermalModel.load(thermal_model)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(f"cannot attribute: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    result = attribute(trace, em, tm)
+    typer.echo(render(result))
+
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(result.as_dict(), indent=2), encoding="utf-8")
+        typer.echo(f"\nwrote {json_out}")
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess in tests
